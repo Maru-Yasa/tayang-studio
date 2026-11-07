@@ -2,9 +2,12 @@ import type { Autopilot, AutopilotFrequency } from '@tayang/shared';
 import { i18n, locale } from '@/i18n';
 
 /** Video lengths an autopilot offers, in seconds. */
-export const LENGTHS = [15, 30, 45, 60, 90];
-/** At most this many daily times. */
+export const LENGTHS = [45, 60, 90];
+/** At most this many videos a day. */
 export const MAX_TIMES = 6;
+/** The day choices, as `Date.getDay()` numbers. */
+export const WEEKDAYS = [1, 2, 3, 4, 5];
+export const WEEKENDS = [0, 6];
 /** Monday first; the number is `Date.getDay()` (0 is Sunday), what the model stores. */
 export const WEEK = [1, 2, 3, 4, 5, 6, 0];
 
@@ -33,6 +36,15 @@ export function nextFreeTime(times: string[]): string {
 export function frequencyLabel(a: Pick<Autopilot, 'frequency'>): string {
   const f = a.frequency;
   if (f.kind === 'daily') return i18n.t('autopilot.daily', { count: f.times.length, times: [...f.times].sort().join(', ') });
+  if (f.kind === 'days') {
+    const same = (set: number[]) => set.length === f.days.length && set.every((d) => f.days.includes(d));
+    const days = same(WEEKDAYS)
+      ? i18n.t('autopilot.form.modeWeekdays')
+      : same(WEEKENDS)
+        ? i18n.t('autopilot.form.modeWeekends')
+        : WEEK.filter((d) => f.days.includes(d)).map(dayName).join(', ');
+    return i18n.t('autopilot.onDays', { count: f.times.length, days, times: [...f.times].sort().join(', ') });
+  }
   const days = WEEK.filter((d) => f.days.includes(d)).map(dayName).join(', ');
   return i18n.t('autopilot.weekly', { count: f.days.length, days, time: f.time });
 }
@@ -41,6 +53,49 @@ export function frequencyLabel(a: Pick<Autopilot, 'frequency'>): string {
 export function slotTime(d: Date): string {
   const part = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(locale(), o).format(d);
   return `${part({ weekday: 'short' })} ${d.getDate()} ${part({ month: 'short' })} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export type DayMode = 'everyday' | 'weekdays' | 'weekends' | 'custom';
+
+/** The day choice that fits a set of weekdays. */
+export function dayModeOf(days: number[]): DayMode {
+  const same = (set: number[]) => set.length === days.length && set.every((d) => days.includes(d));
+  return same(WEEK) ? 'everyday' : same(WEEKDAYS) ? 'weekdays' : same(WEEKENDS) ? 'weekends' : 'custom';
+}
+
+/** What the agent's POST /autopilot may set, read safely: anything malformed is left for the user to pick. */
+export interface AutopilotDraft {
+  name?: string;
+  nicheId?: string;
+  niche?: string;
+  language?: 'id' | 'en';
+  styleId?: string;
+  voiceId?: string;
+  lengthSec?: number;
+  mode?: Exclude<DayMode, 'custom'>;
+  times?: string[];
+  review?: boolean;
+  socialAccountIds?: string[];
+}
+
+export function parseAutopilotDraft(c: Record<string, unknown>): AutopilotDraft {
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  const times = strings(c.times);
+  const accounts = strings(c.socialAccountIds);
+  return {
+    name: str(c.name),
+    nicheId: str(c.nicheId),
+    niche: str(c.niche),
+    styleId: str(c.styleId),
+    voiceId: str(c.voiceId),
+    ...(c.language === 'id' || c.language === 'en' ? { language: c.language } : {}),
+    ...(LENGTHS.includes(c.lengthSec as number) ? { lengthSec: c.lengthSec as number } : {}),
+    ...(c.days === 'everyday' || c.days === 'weekdays' || c.days === 'weekends' ? { mode: c.days } : {}),
+    ...(validTimes(times) ? { times } : {}),
+    ...(typeof c.review === 'boolean' ? { review: c.review } : {}),
+    ...(accounts.length ? { socialAccountIds: [...new Set(accounts)] } : {}),
+  };
 }
 
 const parseTime = (t: string): [number, number] => {
@@ -59,7 +114,7 @@ export function planSlots(autopilot: Pick<Autopilot, 'frequency'>, from: Date, d
   const out: Date[] = [];
   for (let i = 0; i < days; i++) {
     const day = new Date(from.getFullYear(), from.getMonth(), from.getDate() + i);
-    const times = f.kind === 'daily' ? f.times : f.days.includes(day.getDay()) ? [f.time] : [];
+    const times = f.kind === 'daily' ? f.times : !f.days.includes(day.getDay()) ? [] : f.kind === 'days' ? f.times : [f.time];
     for (const t of times) {
       const [h, m] = parseTime(t);
       const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m);

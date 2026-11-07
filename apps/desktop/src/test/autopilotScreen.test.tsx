@@ -38,6 +38,9 @@ const pilot = (extra: Partial<AutopilotT> = {}): AutopilotT => ({
   lengthSec: 45,
   review: true,
   posting: 'manual',
+  nicheId: null,
+  voiceId: null,
+  socialAccountIds: [],
   status: 'active',
   createdAt: 'c',
   updatedAt: 'u',
@@ -93,7 +96,7 @@ describe('Autopilot screen list', () => {
     expect(await screen.findByText(/An autopilot picks a topic in your niche/)).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Oyen' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New autopilot' })).toBeNull();
-    expect(screen.getByText(/Automatic posting to TikTok, Reels and Shorts is coming to Tayang plans/)).toBeInTheDocument();
+    expect(screen.getByText(/Automatic posting to TikTok, Reels and Shorts comes with Tayang plans/)).toBeInTheDocument();
     // See plans opens the plans screen, and Back there returns here.
     await userEvent.click(screen.getByRole('button', { name: 'See plans' }));
     expect(useApp.getState().route).toEqual({ name: 'plans', from: 'autopilot' });

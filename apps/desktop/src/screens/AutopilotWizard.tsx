@@ -1,55 +1,96 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Plus, X } from 'lucide-react';
-import type { AgentInfo, Autopilot, AutopilotFrequency, AutopilotInput, Style, VideoLanguage } from '@tayang/shared';
+import { Check } from 'lucide-react';
+import type { AgentInfo, Autopilot, AutopilotFrequency, AutopilotInput, Niche, SocialAccount, Style, VideoLanguage, Voice } from '@tayang/shared';
 import { AgentLogo } from '@/components/AgentLogo';
 import { Button } from '@/components/Button';
+import { LanguageCombobox, languageLabel } from '@/components/LanguageCombobox';
 import { StepBar } from '@/components/StepBar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { AGENT_NAMES } from '@/lib/agents';
-import { dayName, frequencyLabel, isTime, LENGTHS, MAX_TIMES, nextFreeTime, planSlots, slotTime, validTimes, WEEK } from '@/lib/autopilot';
+import {
+  dayModeOf,
+  dayName,
+  frequencyLabel,
+  LENGTHS,
+  MAX_TIMES,
+  nextFreeTime,
+  parseAutopilotDraft,
+  planSlots,
+  slotTime,
+  validTimes,
+  WEEK,
+  WEEKDAYS,
+  WEEKENDS,
+  type DayMode,
+} from '@/lib/autopilot';
 import { notifyAutopilotChanged } from '@/lib/autopilotHooks';
-import { detectAgents, listAutopilots, listStyles, saveAutopilot } from '@/lib/ipc';
+import { platformName, socialAccounts } from '@/lib/cloud';
+import { detectAgents, listAutopilots, listNiches, listStyles, listVoices, saveAutopilot } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
 import { PreviewImage, posterOf } from '@/screens/Style';
 import { useApp, type Route } from '@/state/app';
 
-const STEP_KEYS = ['niche', 'style', 'schedule', 'agent', 'summary'] as const;
+const STEP_KEYS = ['niche', 'style', 'voice', 'schedule', 'agent', 'summary'] as const;
 type StepKey = (typeof STEP_KEYS)[number];
+const SECTIONS = ['niche', 'style', 'voice', 'schedule', 'agent'] as const;
+const DEFAULT_TIMES = ['12:00'];
+type NicheTab = 'catalog' | 'custom';
+const COUNTS = Array.from({ length: MAX_TIMES }, (_, i) => i + 1);
+const REVIEW_CHOICES = [true, false];
+/** Most target accounts one post may have (the API's limit). */
+const MAX_ACCOUNTS = 10;
+const DAY_MODES: DayMode[] = ['everyday', 'weekdays', 'weekends', 'custom'];
+const MODE_NAMES = { everyday: 'modeEveryday', weekdays: 'modeWeekdays', weekends: 'modeWeekends', custom: 'modeCustom' } as const;
 
 interface Form {
   name: string;
+  /** The catalog niche picked, or null for one the user writes. */
+  nicheId: string | null;
   niche: string;
   language: VideoLanguage;
   styleId: string;
+  voiceId: string | null;
   agentId: AgentInfo['id'] | '';
-  mode: 'daily' | 'weekly';
+  mode: DayMode;
+  /** One per video a day. */
   times: string[];
+  /** The days of the custom choice. */
   days: number[];
-  time: string;
   lengthSec: number;
   review: boolean;
+  socialAccountIds: string[];
 }
 
-const fromAutopilot = (a: Autopilot): Form => ({
-  name: a.name,
-  niche: a.niche,
-  language: a.language,
-  styleId: a.styleId,
-  agentId: a.agentId,
-  mode: a.frequency.kind,
-  times: a.frequency.kind === 'daily' ? a.frequency.times : ['12:00'],
-  days: a.frequency.kind === 'weekly' ? a.frequency.days : [1, 3, 5],
-  time: a.frequency.kind === 'weekly' ? a.frequency.time : '09:00',
-  lengthSec: a.lengthSec,
-  review: a.review,
-});
+const fromAutopilot = (a: Autopilot): Form => {
+  const f = a.frequency;
+  const days = f.kind === 'daily' ? WEEK : f.days;
+  return {
+    name: a.name,
+    nicheId: a.nicheId,
+    niche: a.niche,
+    language: a.language,
+    styleId: a.styleId,
+    voiceId: a.voiceId,
+    agentId: a.agentId,
+    mode: dayModeOf(days),
+    times: f.kind === 'weekly' ? [f.time] : f.times,
+    days: f.kind === 'daily' ? WEEKDAYS : f.days,
+    lengthSec: a.lengthSec,
+    review: a.review,
+    socialAccountIds: a.socialAccountIds,
+  };
+};
 
-const frequencyOf = (f: Form): AutopilotFrequency =>
-  f.mode === 'daily' ? { kind: 'daily', times: [...f.times].sort() } : { kind: 'weekly', days: [...f.days].sort((a, b) => a - b), time: f.time };
+const frequencyOf = (f: Form): AutopilotFrequency => {
+  const times = [...f.times].sort();
+  if (f.mode === 'everyday') return { kind: 'daily', times };
+  const days = f.mode === 'weekdays' ? WEEKDAYS : f.mode === 'weekends' ? WEEKENDS : f.days;
+  return { kind: 'days', days: [...days].sort((a, b) => a - b), times };
+};
 
 /**
  * Keyboard for a radio group: the arrow keys move the choice, and the focus with it (ARIA radio pattern).
@@ -68,23 +109,37 @@ function radioKeys<T>(values: T[], current: T, pick: (v: T) => void) {
 const tabStop = <T,>(values: T[], current: T, v: T) => (v === current || (!values.includes(current) && v === values[0]) ? 0 : -1);
 
 /** New (no `id`) or edit an autopilot, one step at a time, on its own screen. */
-export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: Date }) {
+export function AutopilotWizard({ id, draft, now = new Date() }: { id?: string; draft?: Record<string, unknown>; now?: Date }) {
   const { t } = useTranslation();
   const settings = useApp((s) => s.settings);
+  const languageLabelId = useId();
+  const suggested = draft ? parseAutopilotDraft(draft) : null;
   const [form, setForm] = useState<Form>(() => ({
-    name: '',
-    niche: '',
-    language: settings?.language ?? 'id',
-    styleId: '',
+    name: suggested?.name ?? '',
+    nicheId: suggested?.nicheId ?? null,
+    niche: suggested?.niche ?? '',
+    language: suggested?.language ?? settings?.language ?? 'id',
+    styleId: suggested?.styleId ?? '',
+    voiceId: suggested?.voiceId ?? null,
     agentId: '',
-    mode: 'daily',
-    times: ['12:00'],
-    days: [1, 3, 5],
-    time: '09:00',
-    lengthSec: 30,
-    review: true,
+    mode: suggested?.mode ?? 'everyday',
+    times: suggested?.times ?? DEFAULT_TIMES,
+    days: WEEKDAYS,
+    lengthSec: suggested?.lengthSec ?? 60,
+    review: suggested?.review ?? true,
+    socialAccountIds: suggested?.socialAccountIds ?? [],
   }));
-  const [step, setStep] = useState(0);
+  // The agent's suggestion opens on the Summary, where the user checks it and starts it.
+  const [step, setStep] = useState(draft ? STEP_KEYS.indexOf('summary') : 0);
+  const [niches, setNiches] = useState<Niche[]>([]);
+  const [nicheLoad, setNicheLoad] = useState<'loading' | 'ready' | 'failed'>('loading');
+  // The agent's own description, unlike a catalog id, belongs on the tab where the user can read it.
+  const [nicheTab, setNicheTab] = useState<NicheTab>(suggested?.niche && !suggested.nicheId ? 'custom' : 'catalog');
+  /** What the user wrote: going to the cards and back doesn't lose it. */
+  const [customNiche, setCustomNiche] = useState(suggested?.niche && !suggested.nicheId ? suggested.niche : '');
+  const [voices, setVoices] = useState<Voice[]>([]);
+  const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  const [accountsFailed, setAccountsFailed] = useState(false);
   const [styles, setStyles] = useState<Style[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [editing, setEditing] = useState<Autopilot | null>(null);
@@ -93,7 +148,7 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState<Route | null>(null);
-  const touched = useRef(false);
+  const touched = useRef(!!draft);
   const heading = useRef<HTMLHeadingElement>(null);
   const firstStep = useRef(true);
   const installed = agents.filter((a) => a.installed);
@@ -102,6 +157,30 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
     touched.current = true;
     setForm((f) => ({ ...f, ...patch }));
   };
+
+  /** Loads the cards. The agent names a catalog niche by id: its prompt is what the autopilot keeps. */
+  const loadNiches = () => {
+    setNicheLoad('loading');
+    listNiches()
+      .then((list) => {
+        setNiches(list);
+        setNicheLoad('ready');
+        if (suggested?.nicheId) {
+          const picked = list.find((n) => n.id === suggested.nicheId);
+          if (picked) setForm((f) => (f.nicheId === picked.id ? { ...f, niche: picked.prompt } : f));
+        }
+      })
+      .catch(() => setNicheLoad('failed'));
+  };
+
+  // A niche the catalog no longer has (or the agent made up): what the autopilot kept is shown as the
+  // user's own text, and with none, the step says one is missing rather than start without it.
+  useEffect(() => {
+    if (nicheLoad !== 'ready' || !form.nicheId || niches.some((n) => n.id === form.nicheId)) return;
+    setCustomNiche(form.niche);
+    setNicheTab('custom');
+    setForm((f) => ({ ...f, nicheId: null }));
+  }, [nicheLoad, niches, form.nicheId]);
 
   useEffect(() => {
     listStyles()
@@ -115,6 +194,24 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
         setForm((f) => (f.agentId ? f : { ...f, agentId: (ok.find((a) => a.id === settings?.defaultAgent) ?? ok[0])?.id ?? '' }));
       })
       .catch(() => setAgents([]));
+    loadNiches();
+    listVoices()
+      .then((list) => {
+        setVoices(list);
+        if (suggested?.voiceId && !list.some((v) => v.id === suggested.voiceId)) setForm((f) => ({ ...f, voiceId: null }));
+      })
+      .catch(() => {
+        setVoices([]);
+        if (suggested?.voiceId) setForm((f) => ({ ...f, voiceId: null }));
+      });
+    socialAccounts()
+      .then((list) => {
+        const connected = list.filter((a) => a.status === 'connected');
+        setAccounts(connected);
+        // An account disconnected since: it can't be posted to, and the summary shows what is left.
+        setForm((f) => ({ ...f, socialAccountIds: f.socialAccountIds.filter((x) => connected.some((a) => a.id === x)) }));
+      })
+      .catch(() => setAccountsFailed(true));
     if (!id) return;
     listAutopilots()
       .then((list) => {
@@ -122,6 +219,10 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
         if (!a) throw new Error('gone');
         setEditing(a);
         setForm(fromAutopilot(a));
+        if (!a.nicheId) {
+          setNicheTab('custom');
+          setCustomNiche(a.niche);
+        }
       })
       .catch(() => setLoadError(t('autopilot.cantLoad')))
       .finally(() => setLoading(false));
@@ -159,18 +260,16 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
   }, [step]);
 
   const problems: Record<StepKey, string | null> = {
-    niche: !form.name.trim() ? t('autopilot.form.errors.name') : !form.niche.trim() ? t('autopilot.form.errors.niche') : null,
+    niche: !form.niche.trim()
+      ? nicheTab === 'catalog'
+        ? t('autopilot.form.errors.pickNiche')
+        : t('autopilot.form.errors.niche')
+      : !form.name.trim()
+        ? t('autopilot.form.errors.name')
+        : null,
     style: styles.some((s) => s.id === form.styleId) ? null : t('autopilot.form.errors.style'),
-    schedule:
-      form.mode === 'daily'
-        ? validTimes(form.times)
-          ? null
-          : t('autopilot.form.errors.times')
-        : !form.days.length
-          ? t('autopilot.form.errors.days')
-          : isTime(form.time)
-            ? null
-            : t('autopilot.form.errors.times'),
+    voice: null,
+    schedule: !validTimes(form.times) ? t('autopilot.form.errors.times') : form.mode === 'custom' && !form.days.length ? t('autopilot.form.errors.days') : null,
     agent: installed.some((a) => a.id === form.agentId) ? null : t('autopilot.form.errors.agent'),
     summary: null,
   };
@@ -186,13 +285,16 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
       id: editing?.id,
       name: form.name.trim(),
       niche: form.niche.trim(),
+      nicheId: form.nicheId,
       language: form.language,
       styleId: form.styleId,
+      voiceId: form.voiceId,
       agentId: form.agentId,
       frequency: frequencyOf(form),
       lengthSec: form.lengthSec,
       review: form.review,
-      posting: 'manual',
+      posting: form.socialAccountIds.length ? 'automatic' : 'manual',
+      socialAccountIds: form.socialAccountIds,
     };
     try {
       const saved = await saveAutopilot(input);
@@ -217,42 +319,119 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
   const first = planSlots({ frequency: frequencyOf(form) }, now, 14).slice(0, 3);
   const styleIds = styles.map((s) => s.id);
   const agentIds = installed.map((a) => a.id);
+  const nicheIds = niches.map((n) => n.id);
+  const pickNiche = (nicheId: string) => {
+    const n = niches.find((x) => x.id === nicheId);
+    // A name the card filled in follows the card; one the user typed stays.
+    const named = niches.some((x) => x.title === form.name);
+    if (n) change({ nicheId: n.id, niche: n.prompt, name: form.name.trim() && !named ? form.name : n.title });
+  };
+  const writeNiche = (niche: string) => {
+    setCustomNiche(niche);
+    change({ niche, nicheId: null });
+  };
+  /** Each tab has its own answer: leaving the cards never puts a catalog prompt in the user's box. */
+  const pickNicheTab = (tab: NicheTab) => {
+    if (tab === nicheTab) return;
+    setNicheTab(tab);
+    change({ nicheId: null, niche: tab === 'custom' ? customNiche : '' });
+  };
+  const voiceChoices: (string | null)[] = [null, ...voices.map((v) => v.id), ...(form.voiceId && !voices.some((v) => v.id === form.voiceId) ? [form.voiceId] : [])];
+  const setCount = (n: number) => {
+    const times = form.times.slice(0, n);
+    while (times.length < n) times.push(nextFreeTime(times));
+    change({ times });
+  };
+  const accountName = (a: SocialAccount) => `${platformName(a.platform)}${a.username ? ` · @${a.username}` : ''}`;
   const lengths = LENGTHS.includes(form.lengthSec) ? LENGTHS : [...LENGTHS, form.lengthSec].sort((a, b) => a - b);
 
   const body: Record<StepKey, () => ReactNode> = {
     niche: () => (
       <div className="flex flex-col gap-4">
+        <Tabs value={nicheTab} onValueChange={(v) => pickNicheTab(v as NicheTab)} className="gap-4">
+          <TabsList aria-label={t('autopilot.form.niche')} className="self-start">
+            <TabsTrigger value="catalog">{t('autopilot.form.nicheCatalogTab')}</TabsTrigger>
+            <TabsTrigger value="custom">{t('autopilot.form.nicheCustom')}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="catalog">
+            {nicheLoad === 'loading' && <p className="m-0 text-xs text-text-3">{t('autopilot.form.nicheLoading')}</p>}
+            {nicheLoad === 'ready' && niches.length > 0 && (
+              <div
+                role="radiogroup"
+                aria-label={t('autopilot.form.niche')}
+                onKeyDown={radioKeys(nicheIds, form.nicheId ?? '', pickNiche)}
+                className="grid grid-cols-1 gap-2 min-[700px]:grid-cols-2"
+              >
+                {niches.map((n) => {
+                  const on = n.id === form.nicheId;
+                  return (
+                    <button
+                      key={n.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      tabIndex={tabStop(nicheIds, form.nicheId ?? '', n.id)}
+                      onClick={() => pickNiche(n.id)}
+                      className={cn(
+                        'relative flex cursor-pointer flex-col gap-1 rounded-xl border bg-card p-3 pr-9 text-left',
+                        on ? 'border-primary' : 'border-border hover:border-hairline',
+                      )}
+                    >
+                      <span className="text-[13px] font-medium text-foreground">{n.title}</span>
+                      <span className="line-clamp-3 text-xs text-text-3">{n.prompt}</span>
+                      {on && (
+                        <span aria-hidden="true" className="absolute top-3 right-3 inline-flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                          <Check size={12} strokeWidth={2} />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {(nicheLoad === 'failed' || (nicheLoad === 'ready' && !niches.length)) && (
+              <div className="flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-4">
+                <p className="m-0 text-xs text-text-2">{nicheLoad === 'failed' ? t('autopilot.form.nicheFailed') : t('autopilot.form.nicheEmpty')}</p>
+                <div className="flex flex-wrap gap-2">
+                  {nicheLoad === 'failed' && (
+                    <Button variant="secondary" className="h-8 px-3 text-[13px]" onClick={loadNiches}>
+                      {t('autopilot.form.nicheRetry')}
+                    </Button>
+                  )}
+                  <Button variant="ghost" className="h-8 px-3 text-[13px]" onClick={() => pickNicheTab('custom')}>
+                    {t('autopilot.form.nicheCustom')}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+          <TabsContent value="custom" className="flex flex-col gap-4">
+            <label className={label}>
+              {t('autopilot.form.nicheCustomLabel')}
+              <Textarea value={form.niche} rows={3} placeholder={t('autopilot.form.nichePlaceholder')} onChange={(e) => writeNiche(e.target.value)} />
+            </label>
+            <div role="group" aria-label={t('autopilot.form.examples')} className="flex flex-wrap gap-2">
+              {(['example1', 'example2', 'example3'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => writeNiche(t(`autopilot.form.${k}`))}
+                  className="cursor-pointer rounded-full border border-border bg-card px-3 py-1 text-xs text-text-2 hover:text-foreground"
+                >
+                  {t(`autopilot.form.${k}`)}
+                </button>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
         <label className={label}>
           {t('autopilot.form.name')}
           <Input value={form.name} placeholder={t('autopilot.form.namePlaceholder')} onChange={(e) => change({ name: e.target.value })} />
         </label>
-        <label className={label}>
-          {t('autopilot.form.niche')}
-          <Textarea value={form.niche} rows={3} placeholder={t('autopilot.form.nichePlaceholder')} onChange={(e) => change({ niche: e.target.value })} />
-        </label>
-        <div role="group" aria-label={t('autopilot.form.examples')} className="flex flex-wrap gap-2">
-          {(['example1', 'example2', 'example3'] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => change({ niche: t(`autopilot.form.${k}`) })}
-              className="cursor-pointer rounded-full border border-border bg-card px-3 py-1 text-xs text-text-2 hover:text-foreground"
-            >
-              {t(`autopilot.form.${k}`)}
-            </button>
-          ))}
+        <div className={cn(label, 'max-w-[240px]')}>
+          <span id={languageLabelId}>{t('autopilot.form.language')}</span>
+          <LanguageCombobox labelledBy={languageLabelId} value={form.language} onChange={(language) => change({ language })} />
         </div>
-        <label className={cn(label, 'max-w-[240px]')}>
-          {t('autopilot.form.language')}
-          <select
-            value={form.language}
-            onChange={(e) => change({ language: e.target.value as VideoLanguage })}
-            className="h-9 rounded-md border border-input bg-card px-2 text-sm text-foreground"
-          >
-            <option value="id">Bahasa Indonesia</option>
-            <option value="en">English</option>
-          </select>
-        </label>
       </div>
     ),
     style: () => (
@@ -305,73 +484,79 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
         </button>
       </div>
     ),
+    voice: () => (
+      <div className="flex flex-col gap-3">
+        <div role="radiogroup" aria-label={t('autopilot.form.voice')} onKeyDown={radioKeys(voiceChoices, form.voiceId, (voiceId) => change({ voiceId }))} className="flex flex-col gap-2">
+          {voiceChoices.map((voiceId) => {
+            const v = voices.find((x) => x.id === voiceId);
+            const on = voiceId === form.voiceId;
+            return (
+              <div key={voiceId ?? 'default'} className={cn('flex items-center gap-3 rounded-xl border bg-card p-3', on ? 'border-primary' : 'border-border')}>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  tabIndex={tabStop(voiceChoices, form.voiceId, voiceId)}
+                  onClick={() => change({ voiceId })}
+                  className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 border-0 bg-transparent p-0 text-left"
+                >
+                  <span className="text-[13px] text-foreground">{voiceId ? (v?.name ?? voiceId) : t('autopilot.form.voiceDefault')}</span>
+                  <span className="text-xs text-text-3">{voiceId ? v?.description : t('autopilot.form.voiceDefaultHint')}</span>
+                </button>
+                {v?.previewUrl && <audio controls preload="none" src={v.previewUrl} aria-label={t('autopilot.form.voicePreview', { name: v.name })} className="h-8 w-44 shrink-0" />}
+              </div>
+            );
+          })}
+        </div>
+        <p className="m-0 text-xs text-text-3">{t('autopilot.form.voiceCredits')}</p>
+      </div>
+    ),
     schedule: () => (
       <div className="flex flex-col gap-4">
-        <div className="flex gap-2">
-          {(['daily', 'weekly'] as const).map((m) => (
+        <div role="group" aria-label={t('autopilot.form.frequency')} className="flex flex-wrap gap-2">
+          {DAY_MODES.map((m) => (
             <button key={m} type="button" aria-pressed={form.mode === m} className={chip(form.mode === m)} onClick={() => change({ mode: m })}>
-              {m === 'daily' ? t('autopilot.form.modeDaily') : t('autopilot.form.modeWeekly')}
+              {t(`autopilot.form.${MODE_NAMES[m]}`)}
             </button>
           ))}
         </div>
-        {form.mode === 'daily' ? (
-          <div className="flex flex-col gap-2">
-            <span className="text-xs text-text-2">{t('autopilot.form.times')}</span>
-            <div className="flex flex-wrap items-center gap-2">
-              {form.times.map((v, i) => (
-                <span key={i} className="inline-flex items-center gap-1">
-                  <Input
-                    type="time"
-                    aria-label={t('autopilot.form.timeN', { n: i + 1 })}
-                    value={v}
-                    className="h-9 w-[110px]"
-                    onChange={(e) => change({ times: form.times.map((x, j) => (j === i ? e.target.value : x)) })}
-                  />
-                  {form.times.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      aria-label={t('autopilot.form.removeTime', { time: v || String(i + 1) })}
-                      className="size-8 px-0"
-                      onClick={() => change({ times: form.times.filter((_, j) => j !== i) })}
-                    >
-                      <X size={14} strokeWidth={1.5} aria-hidden="true" />
-                    </Button>
-                  )}
-                </span>
-              ))}
-              {form.times.length < MAX_TIMES && (
-                <Button type="button" variant="secondary" className="h-8 px-3 text-[13px]" onClick={() => change({ times: [...form.times, nextFreeTime(form.times)] })}>
-                  <Plus size={14} strokeWidth={1.5} aria-hidden="true" />
-                  {t('autopilot.form.addTime')}
-                </Button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <div role="group" aria-label={t('autopilot.form.days')} className="flex flex-wrap gap-2">
-              {WEEK.map((d) => {
-                const on = form.days.includes(d);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    aria-pressed={on}
-                    className={chip(on)}
-                    onClick={() => change({ days: on ? form.days.filter((x) => x !== d) : [...form.days, d] })}
-                  >
-                    {dayName(d)}
-                  </button>
-                );
-              })}
-            </div>
-            <label className={label}>
-              {t('autopilot.form.time')}
-              <Input type="time" value={form.time} className="h-9 w-[110px]" onChange={(e) => change({ time: e.target.value })} />
-            </label>
+        {form.mode === 'custom' && (
+          <div role="group" aria-label={t('autopilot.form.days')} className="flex flex-wrap gap-2">
+            {WEEK.map((d) => {
+              const on = form.days.includes(d);
+              return (
+                <button key={d} type="button" aria-pressed={on} className={chip(on)} onClick={() => change({ days: on ? form.days.filter((x) => x !== d) : [...form.days, d] })}>
+                  {dayName(d)}
+                </button>
+              );
+            })}
           </div>
         )}
+        <div role="radiogroup" aria-label={t('autopilot.form.perDay')} onKeyDown={radioKeys(COUNTS, form.times.length, setCount)} className="flex flex-col gap-2">
+          <span className="text-xs text-text-2">{t('autopilot.form.perDay')}</span>
+          <div className="flex flex-wrap gap-2">
+            {COUNTS.map((n) => (
+              <button key={n} type="button" role="radio" aria-checked={form.times.length === n} tabIndex={tabStop(COUNTS, form.times.length, n)} className={chip(form.times.length === n)} onClick={() => setCount(n)}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-xs text-text-2">{t('autopilot.form.times')}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {form.times.map((v, i) => (
+              <Input
+                key={i}
+                type="time"
+                aria-label={t('autopilot.form.timeN', { n: i + 1 })}
+                value={v}
+                className="h-9 w-[110px]"
+                onChange={(e) => change({ times: form.times.map((x, j) => (j === i ? e.target.value : x)) })}
+              />
+            ))}
+          </div>
+        </div>
         <div
           role="radiogroup"
           aria-label={t('autopilot.form.length')}
@@ -435,49 +620,69 @@ export function AutopilotWizard({ id, now = new Date() }: { id?: string; now?: D
         <p data-testid="autopilot-auto-mode" className="m-0 rounded-xl border border-border bg-card p-4 text-xs leading-normal text-text-2">
           {t('autopilot.wizard.autoMode')}
         </p>
-        <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-card p-4">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="autopilot-review" className="text-sm">
-              {t('autopilot.form.review')}
-            </label>
-            <span className="text-xs text-text-3">{form.review ? t('autopilot.wizard.reviewOn') : t('autopilot.wizard.reviewOff')}</span>
-          </div>
-          <Switch id="autopilot-review" checked={form.review} onCheckedChange={(review) => change({ review })} />
+        <div role="radiogroup" aria-label={t('autopilot.form.review')} onKeyDown={radioKeys(REVIEW_CHOICES, form.review, (review) => change({ review }))} className="flex flex-col gap-2">
+          <span className="text-xs text-text-2">{t('autopilot.form.review')}</span>
+          {REVIEW_CHOICES.map((review) => {
+            const on = form.review === review;
+            return (
+              <button
+                key={String(review)}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                tabIndex={tabStop(REVIEW_CHOICES, form.review, review)}
+                onClick={() => change({ review })}
+                className={cn('flex cursor-pointer flex-col gap-0.5 rounded-xl border bg-card p-3 text-left', on ? 'border-primary' : 'border-border hover:border-hairline')}
+              >
+                <span className="text-[13px] text-foreground">{review ? t('autopilot.wizard.reviewValueOn') : t('autopilot.wizard.reviewValueOff')}</span>
+                <span className="text-xs text-text-3">{review ? t('autopilot.wizard.reviewOn') : t('autopilot.wizard.reviewOff')}</span>
+              </button>
+            );
+          })}
         </div>
         <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="mb-1 p-0 text-xs text-text-2">{t('autopilot.form.posting')}</legend>
-          <label className="flex items-start gap-2 text-sm">
-            <input type="radio" name="posting" checked readOnly className="mt-1 accent-[var(--color-primary)]" />
-            <span className="flex flex-col">
-              {t('autopilot.form.manual')}
-              <span className="text-xs text-text-3">{t('autopilot.form.manualHint')}</span>
-            </span>
-          </label>
-          <label className="flex items-start gap-2 text-sm text-text-3">
-            <input type="radio" name="posting" disabled className="mt-1" />
-            <span>
-              {t('autopilot.form.automatic')} · {t('autopilot.form.comingSoon')}
-            </span>
-          </label>
+          <legend className="mb-1 p-0 text-xs text-text-2">{t('autopilot.form.accounts')}</legend>
+          {accounts.map((a) => (
+            <label key={a.id} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.socialAccountIds.includes(a.id)}
+                disabled={!form.socialAccountIds.includes(a.id) && form.socialAccountIds.length >= MAX_ACCOUNTS}
+                onChange={(e) => change({ socialAccountIds: e.target.checked ? [...form.socialAccountIds, a.id] : form.socialAccountIds.filter((x) => x !== a.id) })}
+                className="accent-[var(--color-primary)]"
+              />
+              {accountName(a)}
+            </label>
+          ))}
+          {!accounts.length && <p className="m-0 text-xs text-text-3">{accountsFailed ? t('autopilot.form.accountsFailed') : t('autopilot.form.noAccounts')}</p>}
+          <p className="m-0 text-xs text-text-3">{form.socialAccountIds.length ? t('autopilot.form.accountsHint') : t('autopilot.form.manualHint')}</p>
+          <button type="button" onClick={() => useApp.getState().navigate({ name: 'social' })} className="cursor-pointer self-start border-0 bg-transparent p-0 text-xs text-orange-light underline">
+            {t('autopilot.form.connectAccount')}
+          </button>
         </fieldset>
       </div>
     ),
     summary: () => {
       const rows: [StepKey, string, string][] = [
         ['niche', t('autopilot.form.name'), form.name.trim()],
-        ['niche', t('autopilot.form.niche'), form.niche.trim()],
-        ['niche', t('autopilot.form.language'), form.language === 'id' ? 'Bahasa Indonesia' : 'English'],
+        ['niche', t('autopilot.form.niche'), niches.find((n) => n.id === form.nicheId)?.title ?? form.niche.trim()],
+        ['niche', t('autopilot.form.language'), languageLabel(form.language)],
         ['style', t('autopilot.form.style'), style?.name ?? ''],
-        ['schedule', t('autopilot.form.frequency'), validTimes(form.times) || form.mode === 'weekly' ? frequencyLabel({ frequency: frequencyOf(form) }) : ''],
+        ['voice', t('autopilot.form.voice'), form.voiceId ? (voices.find((v) => v.id === form.voiceId)?.name ?? form.voiceId) : t('autopilot.form.voiceDefault')],
+        ['schedule', t('autopilot.form.frequency'), validTimes(form.times) ? frequencyLabel({ frequency: frequencyOf(form) }) : ''],
         ['schedule', t('autopilot.form.length'), t('chat.seconds', { n: form.lengthSec })],
         ['agent', t('autopilot.form.agent'), form.agentId ? AGENT_NAMES[form.agentId] : ''],
         ['agent', t('autopilot.wizard.autoModeLabel'), t('autopilot.wizard.autoModeValue')],
         ['agent', t('autopilot.form.review'), form.review ? t('autopilot.wizard.reviewValueOn') : t('autopilot.wizard.reviewValueOff')],
-        ['agent', t('autopilot.form.posting'), t('autopilot.form.manual')],
+        [
+          'agent',
+          t('autopilot.form.accounts'),
+          form.socialAccountIds.map((x) => { const a = accounts.find((c) => c.id === x); return a ? accountName(a) : x; }).join(', ') || t('autopilot.form.manual'),
+        ],
       ];
       return (
         <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
-          {(['niche', 'style', 'schedule', 'agent'] as const).map((section) => (
+          {SECTIONS.map((section) => (
             <div key={section} data-testid={`summary-${section}`} className="flex items-start gap-4 p-4">
               <dl className="m-0 grid flex-1 grid-cols-[120px_1fr] gap-x-4 gap-y-1 text-[13px]">
                 {rows

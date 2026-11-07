@@ -576,6 +576,8 @@ pub enum AutopilotFrequency {
     Daily { times: Vec<String> },
     /// `days` are 0 (Sunday) to 6 (Saturday).
     Weekly { days: Vec<u8>, time: String },
+    /// Chosen days (0 to 6) with the same 1 to 6 "HH:MM" times on each.
+    Days { days: Vec<u8>, times: Vec<String> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -589,6 +591,7 @@ pub enum AutopilotStatus {
 #[serde(rename_all = "kebab-case")]
 pub enum Posting {
     Manual,
+    Automatic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -597,13 +600,19 @@ pub struct Autopilot {
     pub id: String,
     pub name: String,
     pub niche: String,
+    #[serde(default)]
+    pub niche_id: Option<String>,
     pub language: VideoLanguage,
     pub style_id: String,
+    #[serde(default)]
+    pub voice_id: Option<String>,
     pub agent_id: AgentId,
     pub frequency: AutopilotFrequency,
     pub length_sec: u32,
     pub review: bool,
     pub posting: Posting,
+    #[serde(default)]
+    pub social_account_ids: Vec<String>,
     pub status: AutopilotStatus,
     pub created_at: String,
     pub updated_at: String,
@@ -617,13 +626,19 @@ pub struct AutopilotInput {
     pub id: Option<String>,
     pub name: String,
     pub niche: String,
+    #[serde(default)]
+    pub niche_id: Option<String>,
     pub language: VideoLanguage,
     pub style_id: String,
+    #[serde(default)]
+    pub voice_id: Option<String>,
     pub agent_id: AgentId,
     pub frequency: AutopilotFrequency,
     pub length_sec: u32,
     pub review: bool,
     pub posting: Posting,
+    #[serde(default)]
+    pub social_account_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

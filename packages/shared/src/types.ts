@@ -109,6 +109,33 @@ export type ToolKind =
   | 'switch_mode'
   | 'other';
 
+/** One bar in a chat's trace. A turn's tokens add up its calls; a tool has tokens only if it ran a subagent. */
+export interface TraceSpan {
+  id: string;
+  parentId: string | null;
+  kind: 'turn' | 'llm' | 'tool';
+  /** The model of a model call, the tool of a tool call; empty for a turn. */
+  name: string;
+  /** What a turn was asked or a tool call was for. */
+  detail: string | null;
+  startMs: number;
+  endMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  failed: boolean;
+  /** A tool call with no result yet: still running, or cut off. */
+  open: boolean;
+}
+
+/** GET a chat's trace: only Claude Code's session files have one. */
+export interface ChatTrace {
+  spans: TraceSpan[];
+  supported: boolean;
+  costUsd: number | null;
+}
+
 export type MessagePart =
   | { type: 'text'; text: string }
   | { type: 'mention'; projectId: string; title: string }
@@ -365,21 +392,29 @@ export interface Spend {
 /** How often an autopilot makes a video. Times are "HH:MM" in local time; days are 0 (Sunday) to 6 (Saturday). */
 export type AutopilotFrequency =
   | { kind: 'daily'; times: string[] }
-  | { kind: 'weekly'; days: number[]; time: string };
+  | { kind: 'weekly'; days: number[]; time: string }
+  /** Weekdays, weekends or any chosen days, with the same 1 to 6 times on each. */
+  | { kind: 'days'; days: number[]; times: string[] };
 
 export interface Autopilot {
   id: string;
   name: string;
+  /** What the videos are about: the agent's brief. From a catalog niche this is a copy of its prompt. */
   niche: string;
+  /** The catalog niche it started from; null for a niche the user wrote. */
+  nicheId: string | null;
   language: VideoLanguage;
   styleId: string;
+  /** The catalog voice for voice-overs; null lets the agent use the default. */
+  voiceId: string | null;
   agentId: AgentId;
   frequency: AutopilotFrequency;
   lengthSec: number;
   /** Finished videos wait for Approve (reviewState 'pending') instead of going straight to Ready. */
   review: boolean;
-  /** Only manual for now: a reminder at post time. */
-  posting: 'manual';
+  /** 'automatic' posts to `socialAccountIds`, after Approve when `review` is on; 'manual' only reminds. */
+  posting: 'manual' | 'automatic';
+  socialAccountIds: string[];
   status: 'active' | 'paused';
   createdAt: string;
   updatedAt: string;

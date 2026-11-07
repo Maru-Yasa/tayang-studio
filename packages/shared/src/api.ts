@@ -20,6 +20,31 @@ export interface StylesResponse {
   styles: Style[];
 }
 
+/** A niche an autopilot can start from: `prompt` tells the agent what its videos are about. */
+export interface Niche {
+  id: string;
+  title: string;
+  prompt: string;
+}
+
+/** GET /v1/niches */
+export interface NichesResponse {
+  niches: Niche[];
+}
+
+/** A voice-over voice; `id` is what POST /v1/ai/voice takes as `voice`. */
+export interface Voice {
+  id: string;
+  name: string;
+  description: string;
+  previewUrl: string | null;
+}
+
+/** GET /v1/voices */
+export interface VoicesResponse {
+  voices: Voice[];
+}
+
 /** `tayang.json` at the root of a style template zip. */
 export interface TemplateManifest {
   engine: 'remotion' | 'hyperframes';

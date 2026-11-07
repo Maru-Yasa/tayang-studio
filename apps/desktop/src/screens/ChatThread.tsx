@@ -8,6 +8,7 @@ import { PermissionCard } from '@/components/PermissionCard';
 import { QuestionCard } from '@/components/QuestionCard';
 import { ScrollToBottom } from '@/components/ScrollToBottom';
 import { stylesFor, TemplateChip, templateOf, useChipTemplate, useStyles } from '@/components/TemplateChip';
+import { TraceButton } from '@/components/TraceDialog';
 import { TurnRail } from '@/components/TurnRail';
 import { listProjects } from '@/lib/ipc';
 import { lastMentionedStyle, mentionContext, mentionedIn, styleContext } from '@/lib/mentions';
@@ -148,6 +149,14 @@ export function ChatThread({ chatId, draft, styleId: routeStyleId }: { chatId: s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPick, streaming, busy, chatId]);
 
+  // The agent set up an autopilot (POST /autopilot): once its turn is over, the user checks it in the wizard.
+  const pendingAutopilot = useChat((s) => (s.actions[chatId] ?? []).some((a) => a.name === 'create_autopilot'));
+  useEffect(() => {
+    if (!pendingAutopilot || streaming) return;
+    const a = useChat.getState().takeAction(chatId, 'create_autopilot');
+    if (a) useApp.getState().navigate({ name: 'autopilot-wizard', draft: a.context });
+  }, [pendingAutopilot, streaming, chatId]);
+
   const onA2uiAction = (a: A2uiAction) => {
     if (a.name !== 'pick_topic') return false;
     const idea = topicIdeaFromAction(a.context);
@@ -165,6 +174,7 @@ export function ChatThread({ chatId, draft, styleId: routeStyleId }: { chatId: s
         <span className="shrink-0 text-xs text-text-3">
           {attached === 0 ? t('chat.noVideo') : t('chat.videosAttached', { count: attached })}
         </span>
+        <TraceButton chatId={chatId} className="ml-auto" />
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col items-center px-6">

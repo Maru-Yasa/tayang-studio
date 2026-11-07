@@ -55,14 +55,14 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /^Agents/ })).not.toHaveTextContent(/\d/);
   });
 
-  it('has Autopilot between Style and Agents, marked Soon, and it opens the Autopilot screen', async () => {
+  it('has Autopilot between Style and Agents, and it opens the Autopilot screen', async () => {
     useApp.setState({ route: { name: 'videos' }, leaveGuard: null });
     render(<Sidebar active="autopilot" />);
     const names = screen.getAllByRole('link').map((l) => l.textContent);
-    expect(names.indexOf('Autopilot Soon')).toBe(names.indexOf('Style') + 1);
-    expect(names.indexOf('Agents')).toBe(names.indexOf('Autopilot Soon') + 1);
-    expect(screen.getByRole('link', { name: 'Autopilot Soon' })).toHaveAttribute('aria-current', 'page');
-    await userEvent.click(screen.getByRole('link', { name: 'Autopilot Soon' }));
+    expect(names.indexOf('Autopilot')).toBe(names.indexOf('Style') + 1);
+    expect(names.indexOf('Agents')).toBe(names.indexOf('Autopilot') + 1);
+    expect(screen.getByRole('link', { name: 'Autopilot' })).toHaveAttribute('aria-current', 'page');
+    await userEvent.click(screen.getByRole('link', { name: 'Autopilot' }));
     expect(useApp.getState().route).toEqual({ name: 'autopilot' });
   });
 });

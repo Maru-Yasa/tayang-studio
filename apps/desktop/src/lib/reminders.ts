@@ -18,7 +18,7 @@ export interface Reminder {
 /**
  * Which reminders are due at `now`, earliest due time first. A video waiting for approval only gets the
  * review reminder (from two hours before it is due, and on through the due time); every other scheduled
- * video gets "time to post" at its due time. Posted videos, unscheduled ones, ones already reminded and
+ * video not already handed to auto-posting gets "time to post" at its due time. Posted videos, unscheduled ones, ones already reminded and
  * ones more than 24 hours overdue (the Calendar just shows those as overdue) are left out.
  */
 export function dueReminders(projects: Project[], now: Date): Reminder[] {
@@ -32,7 +32,7 @@ export function dueReminders(projects: Project[], now: Date): Reminder[] {
       if (t >= due - REVIEW_LEAD_MS && !project.reviewRemindedAt) {
         found.push({ due, reminder: { project, kind: 'review', late: t >= due, stamp: 'reviewRemindedAt' } });
       }
-    } else if (t >= due && !project.remindedAt) {
+    } else if (t >= due && !project.remindedAt && !project.socialPostId) {
       found.push({ due, reminder: { project, kind: 'post', late: false, stamp: 'remindedAt' } });
     }
   }

@@ -232,7 +232,7 @@ function Shell({ route }: { route: Route }) {
           ) : route.name === 'autopilot' ? (
             <Autopilot key={route.id ?? 'list'} id={route.id} />
           ) : (
-            <AutopilotWizard key={route.id ?? 'new'} id={route.id} />
+            <AutopilotWizard key={route.id ?? 'new'} id={route.id} draft={route.draft} />
           )
         ) : route.name === 'agents' ? (
           <Agents />

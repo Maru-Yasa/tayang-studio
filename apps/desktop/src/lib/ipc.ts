@@ -3,7 +3,10 @@ import type {
   AgentId,
   AgentInfo,
   AgentUsage,
+  ChatTrace,
   Autopilot,
+  NichesResponse,
+  VoicesResponse,
   AutopilotInput,
   AutopilotSlot,
   Chat,
@@ -40,6 +43,7 @@ export const pickFolder = () => invoke<string | null>('pick_folder');
 
 // ---- usage ----
 export const getAgentUsage = (force: boolean) => invoke<AgentUsage[]>('get_agent_usage', { force });
+export const getChatTrace = (chatId: string) => invoke<ChatTrace>('get_chat_trace', { chatId });
 
 // ---- projects ----
 export const listProjects = () => invoke<Project[]>('list_projects');
@@ -64,6 +68,9 @@ export const setPosted = (projectId: string, posted: boolean) =>
 export const approveProject = (projectId: string) => invoke<Project>('approve_project', { projectId });
 
 // ---- autopilots ----
+/** What the wizard offers; both come from the API, so they fail while offline. */
+export const listNiches = () => invoke<NichesResponse>('list_niches').then((r) => r.niches ?? []);
+export const listVoices = () => invoke<VoicesResponse>('list_voices').then((r) => r.voices ?? []);
 export const listAutopilots = () => invoke<Autopilot[]>('list_autopilots');
 /** Creates (no id) or edits (with id) an autopilot; a new one starts active, an edit keeps its status. */
 export const saveAutopilot = (input: AutopilotInput) => invoke<Autopilot>('save_autopilot', { input });

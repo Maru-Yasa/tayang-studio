@@ -123,6 +123,12 @@ vi.mock('@/lib/scheduler', () => ({
   }),
 }));
 
+vi.mock('@/lib/cloud', async (original) => ({
+  ...(await original<typeof import('@/lib/cloud')>()),
+  socialPost: vi.fn(async () => ({ postId: 'post1', status: 'scheduled', postsCharged: 1 })),
+}));
+
+import { socialPost } from '@/lib/cloud';
 import * as ipc from '@/lib/ipc';
 import { setUiLanguage } from '@/i18n';
 import { canStopNow, onAutopilotChanged, stopNow } from '@/lib/autopilotHooks';
@@ -174,6 +180,9 @@ const pilot = (extra: Partial<Autopilot> = {}): Autopilot => ({
   lengthSec: 30,
   review: true,
   posting: 'manual',
+  nicheId: null,
+  voiceId: null,
+  socialAccountIds: [],
   status: 'active',
   createdAt: '',
   updatedAt: '',
@@ -387,6 +396,36 @@ describe('making a video', () => {
     expect(s).toMatchObject({ status: 'done', projectId: p.id, error: null });
     // Never takes the user anywhere.
     expect(useApp.getState().route).toEqual({ name: 'videos' });
+  });
+
+  it('fully automatic with accounts: posts the finished video for its slot, once', async () => {
+    // Posting reads the real clock: pin it to the test's "now", so the slot is still ahead.
+    vi.setSystemTime(NOW);
+    db.autopilots = [pilot({ review: false, posting: 'automatic', socialAccountIds: ['sa_1'], voiceId: 'Rachel' })];
+    await runOnce();
+    vi.useRealTimers();
+    const s = db.slots.find((x) => x.status === 'done')!;
+    expect(socialPost).toHaveBeenCalledTimes(1);
+    expect(socialPost).toHaveBeenCalledWith(expect.objectContaining({ projectId: db.projects[0]!.id, accountIds: ['sa_1'], scheduledAt: new Date(s.dueAt).toISOString() }));
+    expect(prompts.some((p) => p.prompt.includes('"voice":"Rachel"'))).toBe(true);
+    expect(s.error).toBeNull();
+  });
+
+  it('review first: waits for Approve instead of posting', async () => {
+    db.autopilots = [pilot({ review: true, posting: 'automatic', socialAccountIds: ['sa_1'] })];
+    await runOnce();
+    expect(socialPost).not.toHaveBeenCalled();
+    expect(db.projects[0]!.reviewState).toBe('pending');
+  });
+
+  it('a failed post keeps the video: the slot is done and says what happened', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(socialPost).mockRejectedValueOnce(new Error('plan_required'));
+    db.autopilots = [pilot({ review: false, posting: 'automatic', socialAccountIds: ['sa_1'] })];
+    await runOnce();
+    const slot = db.slots.find((x) => x.projectId === db.projects[0]!.id)!;
+    expect(slot.status).toBe('done');
+    expect(localized(slot.error!)).toMatch(/couldn't be posted/);
   });
 
   it('marks the video approved when the autopilot does not review first', async () => {

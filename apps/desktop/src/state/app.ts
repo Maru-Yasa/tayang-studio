@@ -21,7 +21,13 @@ export type Route =
   | { name: 'social' }
   | { name: 'style'; /** Focus the link box when the screen opens. */ focusLink?: boolean }
   | { name: 'autopilot'; /** One autopilot's detail view. */ id?: string }
-  | { name: 'autopilot-wizard'; /** Editing this autopilot; none for a new one. */ id?: string }
+  | {
+      name: 'autopilot-wizard';
+      /** Editing this autopilot; none for a new one. */
+      id?: string;
+      /** What the agent suggested in a chat: the wizard opens on its Summary, for the user to check and start. */
+      draft?: Record<string, unknown>;
+    }
   | { name: 'agents' }
   | { name: 'calendar' }
   | { name: 'settings'; /** The tab to open on (Settings' own id). */ tab?: string }

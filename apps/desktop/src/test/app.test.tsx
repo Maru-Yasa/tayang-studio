@@ -9,6 +9,12 @@ vi.mock('@/lib/ipc', () => ({
   updateSettings: vi.fn(),
   systemLocale: vi.fn(),
   listProjects: vi.fn().mockResolvedValue([]),
+  listAutopilots: vi.fn().mockResolvedValue([]),
+  listSlots: vi.fn().mockResolvedValue([]),
+  listStyles: vi.fn().mockResolvedValue([]),
+  listNiches: vi.fn().mockResolvedValue([]),
+  listVoices: vi.fn().mockResolvedValue([]),
+  detectAgents: vi.fn().mockResolvedValue([]),
   listRecentChats: vi.fn().mockResolvedValue([]),
   listArchivedChats: vi.fn().mockResolvedValue([]),
   setThreadArchived: vi.fn().mockResolvedValue(undefined),
@@ -93,28 +99,34 @@ describe('App start', () => {
     expect(backfillProjectStatus).toHaveBeenCalledWith(false);
   });
 
-  it('leaves the autopilot engine off while Autopilot is coming soon', async () => {
+  it('starts the autopilot engine once onboarded, and stops it on unmount', async () => {
     vi.mocked(startAutopilot).mockClear();
+    vi.mocked(getSettings).mockResolvedValue(base);
+    const first = render(<App />);
+    await screen.findByText('Get started');
+    expect(startAutopilot).not.toHaveBeenCalled();
+    first.unmount();
+    useApp.setState({ settings: null });
     vi.mocked(getSettings).mockResolvedValue({ ...base, onboarded: true });
     const { unmount } = render(<App />);
-    await vi.waitFor(() => expect(useApp.getState().route).toEqual({ name: 'chat-new' }));
-    expect(startAutopilot).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(startAutopilot).toHaveBeenCalledTimes(1));
     unmount();
-    expect(engine.stop).not.toHaveBeenCalled();
+    expect(engine.stop).toHaveBeenCalled();
   });
 
-  it('shows Autopilot as coming soon', async () => {
+  it('opens the Autopilot screen and its wizard, not the coming soon page', async () => {
     vi.mocked(getSettings).mockResolvedValue({ ...base, onboarded: true });
     render(<App />);
     await vi.waitFor(() => expect(useApp.getState().route).toEqual({ name: 'chat-new' }));
     act(() => useApp.getState().navigate({ name: 'autopilot' }));
-    expect(await screen.findByRole('heading', { name: 'Autopilot is coming soon' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Autopilot' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Autopilot is coming soon' })).toBeNull();
     act(() => useApp.getState().navigate({ name: 'autopilot-wizard' }));
-    expect(screen.getByRole('heading', { name: 'Autopilot is coming soon' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open the Calendar' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'New autopilot' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Autopilot is coming soon' })).toBeNull();
   });
 
-  it('the coming soon page sends the user to the Calendar meanwhile', async () => {
+  it('the coming soon page, for when the flag is off, sends the user to the Calendar', async () => {
     render(<ComingSoon feature="autopilot" />);
     await userEvent.click(screen.getByRole('button', { name: 'Open the Calendar' }));
     expect(useApp.getState().route).toEqual({ name: 'calendar' });

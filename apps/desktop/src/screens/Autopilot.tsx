@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, Plus } from 'lucide-react';
+import { CalendarClock, ChevronLeft, Clapperboard, MessageSquare, Pause, Pencil, Play, Plus, Repeat, Square, Trash2, type LucideIcon } from 'lucide-react';
 import type { Autopilot as AutopilotT, AutopilotSlot, Project, SlotStatus, Style } from '@tayang/shared';
 import { Button } from '@/components/Button';
 import { Oyen } from '@/components/Oyen';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { frequencyLabel, planSlots, slotTime } from '@/lib/autopilot';
+import { startAutopilotChat } from '@/lib/autopilotChat';
 import { canStopNow, notifyAutopilotChanged, onAutopilotChanged, stopNow, useCanStopNow } from '@/lib/autopilotHooks';
 import { calendarState } from '@/lib/calendarState';
 import { deleteAutopilot, listAutopilots, listProjects, listSlots, listStyles, setAutopilotStatus, updateSlot } from '@/lib/ipc';
@@ -84,7 +85,12 @@ function StyleThumb({ style, id, className }: { style: Style | undefined; id: st
 function StatusChip({ paused, making }: { paused: boolean; making: boolean }) {
   const { t } = useTranslation();
   return (
-    <span className={cn('inline-flex shrink-0 items-center gap-1.5 text-[11px]', paused && !making ? 'text-text-3' : 'text-orange-light')}>
+    <span
+      className={cn(
+        'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium',
+        making ? 'bg-tint text-orange-light' : paused ? 'border border-hairline text-text-3' : 'bg-raised text-text-2',
+      )}
+    >
       <span
         aria-hidden="true"
         className={cn('size-1.5 rounded-full', making ? 'bg-primary motion-safe:animate-pulse' : paused ? 'border border-text-3' : 'bg-primary')}
@@ -93,6 +99,18 @@ function StatusChip({ paused, making }: { paused: boolean; making: boolean }) {
     </span>
   );
 }
+
+/** One fact about an autopilot: an icon and a short line. */
+function Fact({ icon: Icon, title, children }: { icon: LucideIcon; title?: string; children: ReactNode }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-text-2">
+      <Icon size={14} strokeWidth={1.5} aria-hidden="true" className="shrink-0 text-text-3" />
+      <span title={title}>{children}</span>
+    </span>
+  );
+}
+
+const ACTION = 'h-8 gap-1.5 rounded-md px-2.5 text-xs [&_svg]:size-3.5';
 
 /** One autopilot: what it makes, how often, its state and its actions. `onOpen` makes the summary a button. */
 function AutopilotCard({
@@ -139,53 +157,66 @@ function AutopilotCard({
 
   const summary = (
     <>
-      <StyleThumb style={style} id={a.id} className="h-24 w-[54px] shrink-0 rounded-md border border-hairline" />
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="flex items-center gap-2">
-          <span className="mr-auto truncate text-[15px] font-medium text-foreground">{a.name}</span>
+      <StyleThumb style={style} id={a.id} className={cn('shrink-0 rounded-lg border border-hairline', onOpen ? 'h-[107px] w-[60px]' : 'h-[142px] w-20')} />
+      <span className={cn('flex min-w-0 flex-1 flex-col gap-1.5 self-stretch', onOpen ? 'py-0.5' : 'py-1')}>
+        <span className="flex items-center gap-3">
+          <span className={cn('mr-auto truncate font-medium text-foreground', onOpen ? 'text-base' : 'text-xl tracking-[-0.01em]')}>{a.name}</span>
           <StatusChip paused={paused} making={!!making} />
         </span>
-        <span className="line-clamp-2 text-xs text-text-2">{a.niche}</span>
-        <span className="font-mono text-[11px] text-text-3">{frequencyLabel(a)}</span>
-        <span className="text-xs text-text-3">
-          {next ? <span title={slotTime(next)}>{t('autopilot.nextVideo', { when: inTime(next, now) })}</span> : !paused && t('autopilot.noNext')}
+        <span className="line-clamp-2 max-w-[70ch] text-[13px] leading-[1.5] text-text-2">{a.niche}</span>
+        <span className="mt-auto flex flex-wrap gap-x-4 gap-y-1 pt-1.5">
+          <Fact icon={Repeat}>{frequencyLabel(a)}</Fact>
+          {next ? (
+            <Fact icon={CalendarClock} title={slotTime(next)}>
+              {t('autopilot.nextVideo', { when: inTime(next, now) })}
+            </Fact>
+          ) : (
+            !paused && <Fact icon={CalendarClock}>{t('autopilot.noNext')}</Fact>
+          )}
+          <Fact icon={Clapperboard}>{t('autopilot.counts', { made, failed })}</Fact>
         </span>
-        <span className="font-mono text-[11px] text-text-3">{t('autopilot.counts', { made, failed })}</span>
       </span>
     </>
   );
 
   return (
-    <div data-testid="autopilot-card" className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+    <div
+      data-testid="autopilot-card"
+      className={cn('flex flex-col rounded-xl border bg-card transition-colors', making ? 'border-deep-orange' : 'border-border', onOpen && !making && 'hover:border-hairline')}
+    >
       {onOpen ? (
         <button
           type="button"
           onClick={onOpen}
-          className="flex w-full cursor-pointer items-start gap-3 rounded-md border-0 bg-transparent p-0 text-left focus-visible:outline-2 focus-visible:outline-primary"
+          className="flex w-full cursor-pointer items-start gap-4 rounded-t-xl border-0 bg-transparent p-4 text-left focus-visible:outline-2 focus-visible:outline-primary"
         >
           {summary}
         </button>
       ) : (
-        <div className="flex items-start gap-3">{summary}</div>
+        <div className="flex items-start gap-5 p-5">{summary}</div>
       )}
-      <div className="flex flex-wrap items-center gap-1">
+      <div className={cn('flex flex-wrap items-center gap-1 border-t border-border py-2', onOpen ? 'px-3' : 'px-4')}>
         {making && canStop && (
-          <Button variant="secondary" className="h-7 rounded-sm px-2 text-xs" onClick={() => void job(() => stopNow(making))}>
+          <Button variant="secondary" className={cn(ACTION, 'mr-1')} onClick={() => void job(() => stopNow(making))}>
+            <Square aria-hidden="true" strokeWidth={1.5} />
             {t('autopilot.stopNow')}
           </Button>
         )}
         <Button
           variant="ghost"
-          className="h-7 px-2 text-xs"
+          className={ACTION}
           aria-label={act(paused ? 'resume' : 'pause')}
           onClick={() => void job(() => setAutopilotStatus(a.id, paused ? 'active' : 'paused'))}
         >
+          {paused ? <Play aria-hidden="true" strokeWidth={1.5} /> : <Pause aria-hidden="true" strokeWidth={1.5} />}
           {paused ? t('autopilot.resume') : t('autopilot.pause')}
         </Button>
-        <Button variant="ghost" className="h-7 px-2 text-xs" aria-label={act('edit')} onClick={() => navigate({ name: 'autopilot-wizard', id: a.id })}>
+        <Button variant="ghost" className={ACTION} aria-label={act('edit')} onClick={() => navigate({ name: 'autopilot-wizard', id: a.id })}>
+          <Pencil aria-hidden="true" strokeWidth={1.5} />
           {t('autopilot.edit')}
         </Button>
-        <Button variant="ghost" className="h-7 px-2 text-xs" aria-label={act('delete')} onClick={() => setDeleting(true)}>
+        <Button variant="ghost" className={cn(ACTION, 'ml-auto hover:text-error')} aria-label={act('delete')} onClick={() => setDeleting(true)}>
+          <Trash2 aria-hidden="true" strokeWidth={1.5} />
           {t('autopilot.delete')}
         </Button>
       </div>
@@ -226,12 +257,15 @@ function AutopilotCard({
 function SlotChip({ status }: { status: SlotStatus }) {
   const { t } = useTranslation();
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-text-2">
-      <span aria-hidden="true" className={cn('size-1.5 rounded-full', SLOT_DOT[status])} />
+    <span className={cn('inline-flex w-[104px] shrink-0 items-center gap-1.5 text-xs', status === 'making' ? 'text-orange-light' : 'text-text-2')}>
+      <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', SLOT_DOT[status])} />
       {t(`autopilot.slotState.${status}`)}
     </span>
   );
 }
+
+const LIST = 'm-0 flex list-none flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-card p-0';
+const EMPTY = 'm-0 rounded-xl border border-dashed border-hairline px-4 py-8 text-center text-xs text-text-3';
 
 function Detail({ a, data, now, onError }: { a: AutopilotT; data: Data; now: Date; onError(m: string): void }) {
   const { t } = useTranslation();
@@ -263,59 +297,65 @@ function Detail({ a, data, now, onError }: { a: AutopilotT; data: Data; now: Dat
     <div className="flex flex-col gap-6">
       <AutopilotCard a={a} data={data} now={now} onError={onError} onDeleted={() => navigate({ name: 'autopilot' })} />
 
-      <section aria-labelledby="ap-upcoming" className="flex flex-col gap-2">
-        <h2 id="ap-upcoming" className="m-0 text-base font-medium">
-          {t('autopilot.upcoming')}
-        </h2>
-        {!upcoming.length && <p className="m-0 text-xs text-text-3">{t('autopilot.noUpcoming')}</p>}
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
-          {upcoming.map((s) => {
-            const at = new Date(s.dueAt);
-            const project = s.projectId ? data.projects.find((p) => p.id === s.projectId) : undefined;
-            return (
-              <li key={s.id} data-testid="upcoming-slot" className="flex flex-wrap items-center gap-3 rounded-md bg-card px-3 py-2">
-                <span className="w-[120px] shrink-0 font-mono text-xs text-text-2">{slotTime(at)}</span>
-                <SlotChip status={s.status} />
-                {project && <span className="min-w-0 truncate text-xs text-text-2">{project.title}</span>}
-                {s.status === 'failed' && s.error && <span className="min-w-0 truncate text-xs text-orange-light">{localized(s.error)}</span>}
-                {s.status === 'failed' && at.getTime() > now.getTime() && (
+      <div className="grid grid-cols-1 items-start gap-6 min-[1100px]:grid-cols-2">
+        <section aria-labelledby="ap-upcoming" className="flex min-w-0 flex-col gap-3">
+          <h2 id="ap-upcoming" className="m-0 text-sm font-medium">
+            {t('autopilot.upcoming')}
+          </h2>
+          {!upcoming.length && <p className={EMPTY}>{t('autopilot.noUpcoming')}</p>}
+          {!!upcoming.length && (
+            <ul className={LIST}>
+              {upcoming.map((s) => {
+                const at = new Date(s.dueAt);
+                const project = s.projectId ? data.projects.find((p) => p.id === s.projectId) : undefined;
+                return (
+                  <li key={s.id} data-testid="upcoming-slot" className={cn('flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2', s.status === 'making' && 'bg-tint')}>
+                    <span className={cn('w-[132px] shrink-0 text-[13px] tabular-nums', s.status === 'skipped' ? 'text-text-3' : 'text-foreground')}>{slotTime(at)}</span>
+                    <SlotChip status={s.status} />
+                    {project && <span className="min-w-0 truncate text-xs text-text-2">{project.title}</span>}
+                    {(s.status === 'failed' || s.status === 'done') && s.error && <span className="min-w-0 truncate text-xs text-orange-light">{localized(s.error)}</span>}
+                    {s.status === 'failed' && at.getTime() > now.getTime() && (
+                      <Button
+                        variant="secondary"
+                        className="ml-auto h-7 rounded-sm px-2 text-xs"
+                        aria-label={t('autopilot.tryAgainAria', { time: slotTime(at) })}
+                        onClick={() => void tryAgain(s)}
+                      >
+                        {t('autopilot.tryAgain')}
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section aria-labelledby="ap-made" className="flex min-w-0 flex-col gap-3">
+          <h2 id="ap-made" className="m-0 text-sm font-medium">
+            {t('autopilot.madeBy')}
+          </h2>
+          {!made.length && <p className={EMPTY}>{t('autopilot.noneMade')}</p>}
+          {!!made.length && (
+            <ul className={LIST}>
+              {made.map((p) => (
+                <li key={p.id} data-testid="made-video" className="flex min-h-11 items-center gap-3 px-4 py-2">
+                  <span className="mr-auto min-w-0 truncate text-[13px]">{p.title}</span>
+                  <span className="shrink-0 text-xs text-text-2">{t(`calendar.states.${calendarState(p, now)}`)}</span>
                   <Button
                     variant="secondary"
-                    className="ml-auto h-7 rounded-sm px-2 text-xs"
-                    aria-label={t('autopilot.tryAgainAria', { time: slotTime(at) })}
-                    onClick={() => void tryAgain(s)}
+                    className="h-7 rounded-sm px-2 text-xs"
+                    aria-label={t('autopilot.openVideoAria', { title: p.title })}
+                    onClick={() => void openProjectChat(p).catch(() => onError(t('autopilot.cantUpdate')))}
                   >
-                    {t('autopilot.tryAgain')}
+                    {t('autopilot.openVideo')}
                   </Button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-
-      <section aria-labelledby="ap-made" className="flex flex-col gap-2">
-        <h2 id="ap-made" className="m-0 text-base font-medium">
-          {t('autopilot.madeBy')}
-        </h2>
-        {!made.length && <p className="m-0 text-xs text-text-3">{t('autopilot.noneMade')}</p>}
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
-          {made.map((p) => (
-            <li key={p.id} data-testid="made-video" className="flex items-center gap-3 rounded-md bg-card px-3 py-2">
-              <span className="mr-auto min-w-0 truncate text-[13px]">{p.title}</span>
-              <span className="shrink-0 text-[11px] text-text-2">{t(`calendar.states.${calendarState(p, now)}`)}</span>
-              <Button
-                variant="secondary"
-                className="h-7 rounded-sm px-2 text-xs"
-                aria-label={t('autopilot.openVideoAria', { title: p.title })}
-                onClick={() => void openProjectChat(p).catch(() => onError(t('autopilot.cantUpdate')))}
-              >
-                {t('autopilot.openVideo')}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </section>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -330,6 +370,25 @@ export function Autopilot({ id, now: fixedNow }: { id?: string; now?: Date } = {
   const current = id ? data?.autopilots.find((a) => a.id === id) : undefined;
   const empty = !!data && !data.autopilots.length && !id;
   const newOne = () => navigate({ name: 'autopilot-wizard' });
+  const [startingChat, setStartingChat] = useState(false);
+  const newInChat = async () => {
+    const settings = useApp.getState().settings;
+    if (!settings || startingChat) return;
+    setStartingChat(true);
+    setActionError(null);
+    try {
+      await startAutopilotChat(settings);
+    } catch {
+      setActionError(t('autopilot.chat.cantStart'));
+      setStartingChat(false);
+    }
+  };
+  const chatButton = (
+    <Button variant="secondary" disabled={startingChat} onClick={() => void newInChat()}>
+      <MessageSquare size={16} strokeWidth={1.5} aria-hidden="true" />
+      {t('autopilot.chat.create')}
+    </Button>
+  );
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto p-8">
@@ -339,10 +398,13 @@ export function Autopilot({ id, now: fixedNow }: { id?: string; now?: Date } = {
           <span className="text-sm text-text-2">{t('autopilot.subtitle')}</span>
         </div>
         {!empty && (
-          <Button onClick={newOne}>
-            <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
-            {t('autopilot.add')}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {chatButton}
+            <Button onClick={newOne}>
+              <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
+              {t('autopilot.add')}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -370,7 +432,10 @@ export function Autopilot({ id, now: fixedNow }: { id?: string; now?: Date } = {
         <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
           <Oyen mood="wink" size={64} />
           <p className="m-0 max-w-[420px] text-sm text-text-2">{t('autopilot.emptyLine')}</p>
-          <Button onClick={newOne}>{t('autopilot.createFirst')}</Button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button onClick={newOne}>{t('autopilot.createFirst')}</Button>
+            {chatButton}
+          </div>
         </div>
       )}
 

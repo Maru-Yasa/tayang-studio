@@ -14,6 +14,7 @@ pub mod styles_sync;
 pub mod system;
 pub mod telemetry;
 pub mod types;
+pub mod trace;
 pub mod usage;
 
 use commands::AppState;
@@ -107,6 +108,8 @@ pub fn run() {
             commands::set_posted,
             commands::approve_project,
             commands::list_autopilots,
+            commands::list_niches,
+            commands::list_voices,
             commands::save_autopilot,
             commands::delete_autopilot,
             commands::set_autopilot_status,
@@ -169,6 +172,7 @@ pub fn run() {
             commands::media_thumbnails,
             commands::media_render,
             commands::get_agent_usage,
+            commands::get_chat_trace,
             commands::sync_styles,
             commands::install_style_template,
             commands::render_command,
