@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, PanelRight, Send, SquareTerminal } from 'lucide-react';
 import type { AgentId, Chat, MessagePart, Project } from '@tayang/shared';
+import { TraceButton } from '@/components/TraceDialog';
 import { Button } from '@/components/Button';
 import { Composer } from '@/components/Composer';
 import { MessageList } from '@/components/MessageList';
@@ -215,6 +216,7 @@ export function ChatProject({ chatId, draft }: { chatId: string; draft?: string 
         >
           {rendering ? t('chat.rendering') : t('chat.render')}
         </Button>
+        <TraceButton chatId={chatId} />
         {project && (
           <button
             type="button"

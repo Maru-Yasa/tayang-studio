@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS autopilots (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, niche TEXT NOT NULL, language TEXT NOT NULL,
   style_id TEXT NOT NULL, agent_id TEXT NOT NULL, frequency TEXT NOT NULL, length_sec INTEGER NOT NULL,
   review INTEGER NOT NULL, posting TEXT NOT NULL, status TEXT NOT NULL,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  niche_id TEXT, voice_id TEXT, social_account_ids TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS autopilot_slots (
   id TEXT PRIMARY KEY, autopilot_id TEXT NOT NULL, due_at TEXT NOT NULL, status TEXT NOT NULL,
@@ -100,7 +101,8 @@ const JOB_KEYS: [&str; 12] = [
 
 const AUTOPILOT_SELECT: &str = "SELECT id, name, niche, language, style_id AS styleId, agent_id AS agentId, \
     frequency, length_sec AS lengthSec, review, posting, status, created_at AS createdAt, \
-    updated_at AS updatedAt FROM autopilots";
+    updated_at AS updatedAt, niche_id AS nicheId, voice_id AS voiceId, \
+    social_account_ids AS socialAccountIds FROM autopilots";
 const SLOT_SELECT: &str = "SELECT id, autopilot_id AS autopilotId, due_at AS dueAt, status, \
     project_id AS projectId, error FROM autopilot_slots";
 
@@ -149,8 +151,45 @@ fn valid_time(t: &str) -> bool {
         && b[4].is_ascii_digit()
 }
 
-/// The rules the dialog also follows: name and niche filled in, 1 to 6 distinct "HH:MM" times a
-/// day (or 1 to 7 distinct weekdays 0 to 6 and one time), and a short-form length of 15 to 180 s.
+/// 1 to 6 distinct "HH:MM" times.
+fn check_times(times: &[String]) -> Result<()> {
+    let bad = |m: &str| Err(DbError(m.to_string()));
+    if times.is_empty() || times.len() > 6 {
+        return bad("Pick 1 to 6 times a day");
+    }
+    if times.iter().any(|t| !valid_time(t)) {
+        return bad("Times must look like 09:30");
+    }
+    let mut sorted = times.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    if sorted.len() != times.len() {
+        return bad("Each time can only be used once");
+    }
+    Ok(())
+}
+
+/// 1 to 7 distinct weekdays, 0 to 6.
+fn check_days(days: &[u8]) -> Result<()> {
+    let bad = |m: &str| Err(DbError(m.to_string()));
+    if days.is_empty() || days.iter().any(|d| *d > 6) {
+        return bad("Pick days between 0 and 6");
+    }
+    let mut sorted = days.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    if sorted.len() != days.len() {
+        return bad("Each day can only be picked once");
+    }
+    Ok(())
+}
+
+/// Most target accounts one post may have (the API's limit).
+const MAX_POST_ACCOUNTS: usize = 10;
+
+/// The rules the wizard also follows: name and niche filled in, 1 to 6 distinct "HH:MM" times on
+/// chosen days, a short-form length of 15 to 180 s, a voice name the voice route takes, and
+/// automatic posting only with 1 to 10 distinct accounts.
 pub fn validate_autopilot(a: &AutopilotInput) -> Result<()> {
     let bad = |m: &str| Err(DbError(m.to_string()));
     if a.name.trim().is_empty() {
@@ -165,34 +204,31 @@ pub fn validate_autopilot(a: &AutopilotInput) -> Result<()> {
     if !(15..=180).contains(&a.length_sec) {
         return bad("The video length must be 15 to 180 seconds");
     }
-    match &a.frequency {
-        AutopilotFrequency::Daily { times } => {
-            if times.is_empty() || times.len() > 6 {
-                return bad("Pick 1 to 6 times a day");
-            }
-            if times.iter().any(|t| !valid_time(t)) {
-                return bad("Times must look like 09:30");
-            }
-            let mut sorted = times.clone();
-            sorted.sort();
-            sorted.dedup();
-            if sorted.len() != times.len() {
-                return bad("Each time can only be used once");
-            }
+    if let Some(v) = &a.voice_id {
+        if v.is_empty() || v.len() > 64 || !v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '-')) {
+            return bad("That voice can't be used");
         }
+    }
+    let mut accounts = a.social_account_ids.clone();
+    accounts.sort();
+    accounts.dedup();
+    if accounts.len() != a.social_account_ids.len() || accounts.len() > MAX_POST_ACCOUNTS {
+        return bad("Pick up to 10 different accounts");
+    }
+    if a.posting == Posting::Automatic && accounts.is_empty() {
+        return bad("Pick at least one account to post to");
+    }
+    match &a.frequency {
+        AutopilotFrequency::Daily { times } => check_times(times)?,
         AutopilotFrequency::Weekly { days, time } => {
-            if days.is_empty() || days.iter().any(|d| *d > 6) {
-                return bad("Pick days between 0 and 6");
-            }
-            let mut sorted = days.clone();
-            sorted.sort();
-            sorted.dedup();
-            if sorted.len() != days.len() {
-                return bad("Each day can only be picked once");
-            }
+            check_days(days)?;
             if !valid_time(time) {
                 return bad("The time must look like 09:30");
             }
+        }
+        AutopilotFrequency::Days { days, times } => {
+            check_days(days)?;
+            check_times(times)?;
         }
     }
     Ok(())
@@ -275,6 +311,7 @@ impl Db {
         Self::migrate_styles(&conn)?;
         Self::migrate_jobs(&conn)?;
         Self::migrate_projects(&conn)?;
+        Self::migrate_autopilots(&conn)?;
         Self::migrate_archive(&conn)?;
         Ok(Db { conn: Mutex::new(conn), home: Mutex::new(Default::default()) })
     }
@@ -705,6 +742,21 @@ impl Db {
         Ok(())
     }
 
+    /// Adds the niche, voice and account columns to databases created before them.
+    fn migrate_autopilots(conn: &Connection) -> Result<()> {
+        let mut stmt = conn.prepare("PRAGMA table_info(autopilots)")?;
+        let have = stmt
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(stmt);
+        for (col, def) in [("niche_id", "TEXT"), ("voice_id", "TEXT"), ("social_account_ids", "TEXT NOT NULL DEFAULT '[]'")] {
+            if !have.iter().any(|c| c == col) {
+                conn.execute_batch(&format!("ALTER TABLE autopilots ADD COLUMN {col} {def}"))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Adds the review and posting columns to databases created before them.
     fn migrate_projects(conn: &Connection) -> Result<()> {
         let mut stmt = conn.prepare("PRAGMA table_info(projects)")?;
@@ -970,9 +1022,12 @@ impl Db {
     // ---- autopilots ----
 
     fn autopilot_row(mut v: Value) -> Result<Autopilot> {
-        // `frequency` is stored as JSON text and `review` as 0/1.
+        // `frequency` and `socialAccountIds` are stored as JSON text and `review` as 0/1.
         if let Some(Value::String(f)) = v.get("frequency").cloned() {
             v["frequency"] = serde_json::from_str(&f)?;
+        }
+        if let Some(Value::String(ids)) = v.get("socialAccountIds").cloned() {
+            v["socialAccountIds"] = serde_json::from_str(&ids)?;
         }
         let review = v.get("review").and_then(Value::as_i64).unwrap_or(0) != 0;
         v["review"] = Value::Bool(review);
@@ -1009,13 +1064,16 @@ impl Db {
             id: existing.as_ref().map(|e| e.id.clone()).unwrap_or_else(new_id),
             name: input.name.trim().to_string(),
             niche: input.niche.trim().to_string(),
+            niche_id: input.niche_id.clone(),
             language: input.language,
             style_id: input.style_id.clone(),
+            voice_id: input.voice_id.clone(),
             agent_id: input.agent_id,
             frequency: input.frequency.clone(),
             length_sec: input.length_sec,
             review: input.review,
             posting: input.posting,
+            social_account_ids: input.social_account_ids.clone(),
             status: existing.as_ref().map(|e| e.status).unwrap_or(AutopilotStatus::Active),
             created_at: existing.as_ref().map(|e| e.created_at.clone()).unwrap_or_else(|| stamp.clone()),
             updated_at: stamp,
@@ -1033,15 +1091,17 @@ impl Db {
             )?;
         }
         tx.execute(
-            "INSERT INTO autopilots (id, name, niche, language, style_id, agent_id, frequency, length_sec, review, posting, status, created_at, updated_at) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(id) DO UPDATE SET name=excluded.name, \
+            "INSERT INTO autopilots (id, name, niche, language, style_id, agent_id, frequency, length_sec, review, posting, status, created_at, updated_at, niche_id, voice_id, social_account_ids) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16) ON CONFLICT(id) DO UPDATE SET name=excluded.name, \
              niche=excluded.niche, language=excluded.language, style_id=excluded.style_id, agent_id=excluded.agent_id, \
              frequency=excluded.frequency, length_sec=excluded.length_sec, review=excluded.review, \
-             posting=excluded.posting, updated_at=excluded.updated_at",
+             posting=excluded.posting, updated_at=excluded.updated_at, niche_id=excluded.niche_id, \
+             voice_id=excluded.voice_id, social_account_ids=excluded.social_account_ids",
             rusqlite::params![
                 a.id, a.name, a.niche, text("language"), a.style_id, text("agentId"),
                 serde_json::to_string(&a.frequency)?, a.length_sec, a.review as i64, text("posting"),
-                text("status"), a.created_at, a.updated_at
+                text("status"), a.created_at, a.updated_at, a.niche_id, a.voice_id,
+                serde_json::to_string(&a.social_account_ids)?
             ],
         )?;
         tx.commit()?;
@@ -1720,6 +1780,26 @@ mod tests {
     }
 
     #[test]
+    fn autopilots_migration_keeps_old_autopilots_and_adds_the_new_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tayang.db");
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE autopilots (id TEXT PRIMARY KEY, name TEXT NOT NULL, niche TEXT NOT NULL, language TEXT NOT NULL, \
+                 style_id TEXT NOT NULL, agent_id TEXT NOT NULL, frequency TEXT NOT NULL, length_sec INTEGER NOT NULL, \
+                 review INTEGER NOT NULL, posting TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+                 INSERT INTO autopilots VALUES ('old','Kopi','Coffee','id','s1','claude','{\"kind\":\"weekly\",\"days\":[1],\"time\":\"08:00\"}',30,1,'manual','active','c','u');",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        let a = db.get_autopilot("old").unwrap().unwrap();
+        assert_eq!((a.niche_id, a.voice_id, a.social_account_ids.len(), a.length_sec), (None, None, 0, 30));
+        assert_eq!(a.frequency, AutopilotFrequency::Weekly { days: vec![1], time: "08:00".into() });
+    }
+
+    #[test]
     fn projects_migration_adds_review_and_posting_columns_to_an_old_database() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tayang.db");
@@ -1855,7 +1935,40 @@ mod tests {
             length_sec: 30,
             review: true,
             posting: Posting::Manual,
+            niche_id: None,
+            voice_id: None,
+            social_account_ids: vec![],
         }
+    }
+
+    #[test]
+    fn autopilot_keeps_niche_voice_accounts_and_chosen_days() {
+        let db = adb();
+        let mut i = input("Kopi");
+        i.niche_id = Some("science-explained".into());
+        i.voice_id = Some("Rachel".into());
+        i.posting = Posting::Automatic;
+        i.social_account_ids = vec!["sa_1".into(), "sa_2".into()];
+        i.frequency = AutopilotFrequency::Days { days: vec![1, 2, 3, 4, 5], times: vec!["09:00".into(), "18:00".into()] };
+        let a = db.save_autopilot(&i).unwrap();
+        assert_eq!(db.get_autopilot(&a.id).unwrap().unwrap(), a);
+        assert_eq!(a.social_account_ids, vec!["sa_1", "sa_2"]);
+        assert_eq!(a.voice_id.as_deref(), Some("Rachel"));
+    }
+
+    #[test]
+    fn autopilot_refuses_automatic_posting_it_cant_do() {
+        let refused = |change: &dyn Fn(&mut AutopilotInput)| {
+            let mut i = input("Kopi");
+            change(&mut i);
+            assert!(validate_autopilot(&i).is_err());
+        };
+        refused(&|i| i.posting = Posting::Automatic);
+        refused(&|i| i.social_account_ids = vec!["a".into(), "a".into()]);
+        refused(&|i| i.social_account_ids = (0..11).map(|n| n.to_string()).collect());
+        refused(&|i| i.voice_id = Some("bad\"voice".into()));
+        refused(&|i| i.frequency = AutopilotFrequency::Days { days: vec![], times: vec!["09:00".into()] });
+        refused(&|i| i.frequency = AutopilotFrequency::Days { days: vec![1], times: vec![] });
     }
 
     #[test]

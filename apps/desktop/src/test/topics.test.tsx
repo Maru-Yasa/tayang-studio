@@ -395,6 +395,21 @@ describe('topic ideas in a new chat', () => {
     expect(useChat.getState().actions['chat-1']).toEqual([]);
   });
 
+  it('opens the wizard with what the agent set up with POST /autopilot, once its turn is over', async () => {
+    render(<ChatRoute />);
+    await userEvent.click(screen.getByRole('button', { name: /From a topic/ }));
+    await waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    const context = { name: 'Sains', nicheId: 'science' };
+    await act(async () => {
+      emit({ kind: 'text', text: 'Siap.' });
+      for (const f of actionHandlers) f({ chatId: 'chat-1', name: 'create_autopilot', context });
+    });
+    expect(useApp.getState().route.name).not.toBe('autopilot-wizard');
+    await act(async () => emit({ kind: 'done', stopReason: 'end_turn' }));
+    await waitFor(() => expect(useApp.getState().route).toEqual({ name: 'autopilot-wizard', draft: context }));
+    expect(useChat.getState().actions['chat-1']).toEqual([]);
+  });
+
   it('asks for the script with the skip line when the frame check is off', async () => {
     useApp.setState({ settings: { ...settings, frameCheck: false } });
     await askTopics(reply('atlas-journey'));

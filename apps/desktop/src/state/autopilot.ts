@@ -13,6 +13,7 @@ import { i18n } from '@/i18n';
 import { agentErrorText } from '@/lib/agents';
 import { planSlots } from '@/lib/autopilot';
 import { notifyAutopilotChanged, setStopNowHandler } from '@/lib/autopilotHooks';
+import { postAutopilotVideo } from '@/lib/autopilotPost';
 import { onAgentUpdate } from '@/lib/events';
 import {
   agentStop,
@@ -223,8 +224,8 @@ async function pickTopic(run: Run): Promise<AutopilotTopic> {
   }
 }
 
-/** Makes the slot's video; resolves to its project id once a rendered file exists. */
-async function makeVideo(run: Run): Promise<string> {
+/** Makes the slot's video; resolves once a rendered file exists, with what went wrong posting it, if anything. */
+async function makeVideo(run: Run): Promise<{ projectId: string; postError: string | null }> {
   const a = run.autopilot;
   /** "Stop now" ends the work at the next step. */
   const live = () => {
@@ -251,7 +252,7 @@ async function makeVideo(run: Run): Promise<string> {
     { type: 'text', text },
   ];
   const opts = { agentId: a.agentId, job: { projectId: project.id, title: topic.title } };
-  const build = buildAutopilotBuildPrompt(topic.title, a.lengthSec, { language: a.language, frameCheck: !skip });
+  const build = buildAutopilotBuildPrompt(topic.title, a.lengthSec, { language: a.language, frameCheck: !skip, voiceId: a.voiceId });
   replyOf(
     await turn(run, chat.id, [{ type: 'text', text: i18n.t('autopilot.slot.buildMessage', { title: topic.title, seconds: a.lengthSec }) }], {
       ...opts,
@@ -283,13 +284,16 @@ async function makeVideo(run: Run): Promise<string> {
   if (run.stopped) await setSchedule(project.id, null).catch(() => {});
   useApp.getState().bumpProjects();
   live();
-  return project.id;
+  // Review first posts on Approve instead. A failed post keeps the video: the slot says what happened.
+  const postError = a.review ? null : await postAutopilotVideo(project, a, run.slot.dueAt);
+  if (!a.review) useApp.getState().bumpProjects();
+  return { projectId: project.id, postError };
 }
 
 async function produce(run: Run): Promise<void> {
   try {
-    const projectId = await makeVideo(run);
-    if (!run.stopped) await updateSlot(run.slot.id, { status: 'done', projectId, error: null });
+    const { projectId, postError } = await makeVideo(run);
+    if (!run.stopped) await updateSlot(run.slot.id, { status: 'done', projectId, error: postError });
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     // The Agents board says what the slot says, and a late `done` can't change it back.

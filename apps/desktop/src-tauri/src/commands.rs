@@ -1785,6 +1785,28 @@ pub async fn media_render(state: State<'_, AppState>, project_id: String) -> Cmd
     .map_err(err)?
 }
 
+/// A public catalog from the API (`/v1/niches`, `/v1/voices`), as the API sends it.
+async fn catalog(state: &State<'_, AppState>, path: &str) -> CmdResult<serde_json::Value> {
+    use crate::styles_sync::Fetcher;
+    let api_url = crate::styles_sync::effective_api_url(&state.db.get_settings(&state.home));
+    let fetcher = crate::styles_sync::HttpFetcher::new(std::time::Duration::from_secs(10))?;
+    let res = fetcher.get(&crate::styles_sync::endpoint(&api_url, path), 1024 * 1024).await?;
+    if !(200..300).contains(&res.status) {
+        return Err(format!("{path} returned {}", res.status));
+    }
+    serde_json::from_slice(&res.body).map_err(err)
+}
+
+#[tauri::command]
+pub async fn list_niches(state: State<'_, AppState>) -> CmdResult<serde_json::Value> {
+    catalog(&state, "/v1/niches").await
+}
+
+#[tauri::command]
+pub async fn list_voices(state: State<'_, AppState>) -> CmdResult<serde_json::Value> {
+    catalog(&state, "/v1/voices").await
+}
+
 /// Fetches the built-in styles from the API; keeps the cached ones when offline.
 #[tauri::command]
 pub async fn sync_styles(state: State<'_, AppState>) -> CmdResult<StylesSync> {
@@ -2567,6 +2589,38 @@ mod tests {
         assert!(check_file_parts(&cwd, &[file(cwd.join("attachments").join("x"))]).is_ok());
         assert!(check_file_parts(&cwd, &[file(tmp.path().join("secret"))]).is_err());
     }
+}
+
+// ---- chat trace ----
+
+/// A chat's turns, model calls and tool calls with their timings and tokens. Claude Code's session
+/// files hold them; a chat with another agent has no trace.
+#[tauri::command]
+pub async fn get_chat_trace(state: State<'_, AppState>, chat_id: String) -> CmdResult<crate::trace::ChatTrace> {
+    let Some(chat) = lookup_chat(&state.db, &chat_id)? else { return Ok(Default::default()) };
+    if chat.agent_id != AgentId::Claude {
+        return Ok(Default::default());
+    }
+    let project = chat.project_id.as_deref().map(|id| state.db.get_project(id)).transpose().map_err(err)?.flatten();
+    let folder = project.as_ref().map(|p| PathBuf::from(&p.folder));
+    let cwd = resolve_cwd(&state.working(), &chat_id, folder.as_deref())?;
+    let tool_ids: std::collections::HashSet<String> = state
+        .db
+        .list_messages(&chat_id)
+        .map_err(err)?
+        .into_iter()
+        .flat_map(|m| m.parts)
+        .filter_map(|p| match p {
+            MessagePart::Tool { tool_call_id, .. } => Some(tool_call_id),
+            _ => None,
+        })
+        .collect();
+    // A project's folder can hold other chats' sessions, so only its tool calls can tell them apart.
+    if folder.is_some() && tool_ids.is_empty() {
+        return Ok(crate::trace::ChatTrace { supported: true, ..Default::default() });
+    }
+    let home = state.home.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::trace::chat_trace(&home, &cwd, &tool_ids)).await.map_err(err)
 }
 
 // ---- agent usage ----

@@ -1,6 +1,6 @@
-import type { Style, VideoKind, VideoLanguage } from '@tayang/shared';
+import type { Niche, SocialAccount, Style, VideoKind, VideoLanguage, Voice } from '@tayang/shared';
 import { clampTopicLength, FACTS_RULE, MOTION_RULES, VIDEO_KINDS } from './style';
-import { FOREGROUND_RULE, RENDERS_RULE } from './frameCheck';
+import { FOREGROUND_RULE, POST_RULE, RENDERS_RULE } from './frameCheck';
 
 // Everything here goes to the agent, never to the user, so it stays in English (i18n-ignore).
 
@@ -78,7 +78,7 @@ export function parseAutopilotTopic(text: string): AutopilotTopic | null {
 export function buildAutopilotBuildPrompt(
   title: string,
   lengthSec: number,
-  opts: { language?: VideoLanguage; frameCheck?: boolean } = {},
+  opts: { language?: VideoLanguage; frameCheck?: boolean; voiceId?: string | null } = {},
 ): string {
   const lang = opts.language ? ` in ${LANGUAGE[opts.language]}` : '';
   const steps = [
@@ -91,8 +91,48 @@ export function buildAutopilotBuildPrompt(
   return [
     'This video is made by an autopilot: work through every step on your own, without asking questions or waiting for a reply.',
     ...steps.map((s, i) => `${i + 1}. ${s}`),
+    ...(opts.voiceId ? [`For the voice-over use Tayang's /voice with "voice":"${opts.voiceId}" in every call.`] : []),
     FOREGROUND_RULE,
     RENDERS_RULE,
+    POST_RULE,
+  ].join('\n');
+}
+
+export interface AutopilotChatInput {
+  niches: Pick<Niche, 'id' | 'title'>[];
+  voices: Pick<Voice, 'id' | 'name' | 'description'>[];
+  styles: Pick<Style, 'id' | 'name'>[];
+  accounts: Pick<SocialAccount, 'id' | 'platform' | 'username'>[];
+  /** The language to talk to the user in. */
+  language: VideoLanguage;
+}
+
+/** Starts a chat that helps the user set up one autopilot; the wizard's Summary is where it is started. */
+export function buildAutopilotChatPrompt({ niches, voices, styles, accounts, language }: AutopilotChatInput): string {
+  const list = (items: string[]) => (items.length ? items.map((i) => `  - ${i}`) : ['  (none available)']);
+  return [
+    `Help the user set up one Tayang autopilot, which makes short videos on a schedule. Talk to them in ${LANGUAGE[language]}.`,
+    'Ask with your question tool, a few things at a time, only for what they have not said yet. Do not create files or run other commands.',
+    '',
+    'What you need:',
+    '- name: a short name for the autopilot.',
+    '- nicheId from this list, or niche: their own description when none fits:',
+    ...list(niches.map((n) => `${n.id}: ${n.title}`)),
+    '- styleId from this list:',
+    ...list(styles.map((s) => `${s.id}: ${s.name}`)),
+    '- voiceId from this list, or null for the default voice:',
+    ...list(voices.map((v) => `${v.id}: ${v.description || v.name}`)),
+    '- language: "id" or "en", the language of the videos.',
+    '- lengthSec: 45, 60 or 90.',
+    '- days: "everyday", "weekdays" or "weekends".',
+    '- times: when videos are due each of those days, "HH:MM" local time, 1 to 6 different times: one per video a day.',
+    '- review: true to approve each video before it is posted, false for fully automatic.',
+    '- socialAccountIds from this list, none to post by hand:',
+    ...list(accounts.map((a) => `${a.id}: ${a.platform}${a.username ? ` @${a.username}` : ''}`)),
+    '',
+    'When you have everything, send it. Tayang shows the user the result to check and start; you cannot start it yourself:',
+    `curl -s -X POST "$TAYANG_AI_URL/autopilot" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -d '{"name":"...","nicheId":"...","styleId":"...","voiceId":"...","language":"id","lengthSec":60,"days":"everyday","times":["09:00"],"review":true,"socialAccountIds":[]}'`,
+    'Then end your turn.',
   ].join('\n');
 }
 

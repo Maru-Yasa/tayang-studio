@@ -94,6 +94,14 @@ pub fn parse_action(path: &str, b: &Value) -> Option<Result<(&'static str, Value
             }
             Ok(("schedule_videos", json!({ "items": items })))
         })()),
+        // The wizard checks every field again and the user confirms there: this only keeps it small.
+        "/autopilot" => Some((|| {
+            text("name").ok_or("name is required")?;
+            if !b.is_object() || b.to_string().len() > 8 * 1024 {
+                return Err("the autopilot must be a JSON object under 8 KB".into());
+            }
+            Ok(("create_autopilot", b.clone()))
+        })()),
         _ => None,
     }
 }
@@ -200,6 +208,8 @@ async fn serve(mut s: tokio::net::TcpStream, proxy: &AiProxy, folder_for: &(dyn 
                     act(&chat, name, context);
                     let message = if name == "pick_topic" {
                         "Tayang is starting this video in its own chat. End your turn now: the video is made there."
+                    } else if name == "create_autopilot" {
+                        "Tayang is showing the user this autopilot to check and start. End your turn now; never say it is running until the user starts it."
                     } else {
                         "Tayang is showing the user these times to confirm. End your turn now; never say they are scheduled until the user confirms."
                     };
@@ -400,6 +410,9 @@ mod tests {
             _ => panic!(),
         }
         assert!(parse_job("/voice", &json!({ "text": "x", "out": "a.wav" })).is_err());
+        assert_eq!(parse_action("/autopilot", &json!({ "name": "Kopi" })).unwrap().unwrap().0, "create_autopilot");
+        assert!(parse_action("/autopilot", &json!({})).unwrap().is_err());
+        assert!(parse_action("/autopilot", &json!({ "name": "Kopi", "niche": "x".repeat(9000) })).unwrap().is_err());
         assert!(parse_job("/video", &json!({})).is_err());
         assert_eq!(nth_path(Path::new("a/b.jpg"), 0), PathBuf::from("a/b.jpg"));
         assert_eq!(nth_path(Path::new("a/b.jpg"), 2), PathBuf::from("a/b-3.jpg"));

@@ -19,7 +19,7 @@ export function onQuestion(cb: (q: AgentQuestion) => void): Promise<UnlistenFn> 
 /** What an agent asked Tayang to do through its local endpoint: start a video, or schedule videos. */
 export interface AgentAction {
   chatId: string;
-  name: 'pick_topic' | 'schedule_videos';
+  name: 'pick_topic' | 'schedule_videos' | 'create_autopilot';
   context: Record<string, unknown>;
 }
 

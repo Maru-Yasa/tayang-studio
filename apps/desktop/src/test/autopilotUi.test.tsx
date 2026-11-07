@@ -67,6 +67,9 @@ const autopilot = (extra: Partial<Autopilot> = {}): Autopilot => ({
   lengthSec: 45,
   review: false,
   posting: 'manual',
+  nicheId: null,
+  voiceId: null,
+  socialAccountIds: [],
   status: 'active',
   createdAt: 'c',
   updatedAt: 'u',
@@ -235,14 +238,15 @@ describe('Autopilot fix round', () => {
 });
 
 describe('Calendar after the Autopilot screen', () => {
-  it('has no autopilot panel or dialog, and no Autopilot link while it is coming soon', async () => {
+  it('has no autopilot panel or dialog, and links to the Autopilot screen', async () => {
     vi.mocked(ipc.listAutopilots).mockResolvedValue([autopilot()]);
     useApp.setState({ route: { name: 'calendar' }, leaveGuard: null });
     render(<Calendar today={today} />);
     await waitFor(() => expect(ipc.listAutopilots).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: 'New autopilot' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Pause Kopi' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Manage autopilots' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Manage autopilots' }));
+    expect(useApp.getState().route).toEqual({ name: 'autopilot' });
   });
 
   it('a Try again that fails says so', async () => {

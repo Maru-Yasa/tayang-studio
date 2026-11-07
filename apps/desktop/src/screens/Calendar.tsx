@@ -10,7 +10,8 @@ import { PermissionCard } from '@/components/PermissionCard';
 import { QuestionCard } from '@/components/QuestionCard';
 import { locale } from '@/i18n';
 import { calendarState, type CalendarState } from '@/lib/calendarState';
-import { approveProject, listAutopilots, listProjects, listSlots, listStyles, setPosted, setSchedule, updateSlot } from '@/lib/ipc';
+import { approveAndPost } from '@/lib/autopilotPost';
+import { listAutopilots, listProjects, listSlots, listStyles, setPosted, setSchedule, updateSlot } from '@/lib/ipc';
 import { localized } from '@/lib/stored';
 import { notifyAutopilotChanged, onAutopilotChanged } from '@/lib/autopilotHooks';
 import { openProjectChat } from '@/lib/openProject';
@@ -472,7 +473,7 @@ export function Calendar({ today: todayProp }: { today?: Date } = {}) {
                               className="h-8 justify-start px-2 text-[13px]"
                               onClick={() => {
                                 setOpenEntry(null);
-                                void update(approveProject(p.id));
+                                void update(approveAndPost(p.id));
                               }}
                             >
                               {t('calendar.approve')}

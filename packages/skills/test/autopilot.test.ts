@@ -3,6 +3,7 @@ import {
   AUTOPILOT_RENDER_NOW,
   AUTOPILOT_TOPIC_RETRY,
   buildAutopilotBuildPrompt,
+  buildAutopilotChatPrompt,
   buildAutopilotTopicPrompt,
   buildTopicIdeasPrompt,
   parseAutopilotTopic,
@@ -109,5 +110,34 @@ describe('follow-ups', () => {
     expect(AUTOPILOT_TOPIC_RETRY).toMatch(/earlier titles/);
     expect(AUTOPILOT_RENDER_NOW).toMatch(/^Render it now/);
     expect(AUTOPILOT_RENDER_NOW).toMatch(/tayang\.json/);
+  });
+
+  it('names the voice only when one is picked, and always asks for post.json', () => {
+    const p = buildAutopilotBuildPrompt('T', 60, { voiceId: 'Rachel' });
+    expect(p).toContain('"voice":"Rachel"');
+    expect(p).toContain('post.json');
+    expect(buildAutopilotBuildPrompt('T', 60)).not.toContain('"voice":');
+  });
+});
+
+describe('buildAutopilotChatPrompt', () => {
+  const input = {
+    niches: [{ id: 'science', title: 'Science explained' }],
+    voices: [{ id: 'Rachel', name: 'Rachel', description: 'Calm narrator' }],
+    styles: [{ id: 'atlas', name: 'Atlas' }],
+    accounts: [{ id: 'sa_1', platform: 'tiktok', username: 'oyen' }],
+    language: 'id' as const,
+  };
+
+  it('gives the agent every option, in the language of the user, and the way to hand over', () => {
+    const p = buildAutopilotChatPrompt(input);
+    for (const part of ['science: Science explained', 'Rachel: Calm narrator', 'atlas: Atlas', 'sa_1: tiktok @oyen', 'Indonesian', '$TAYANG_AI_URL/autopilot', '45, 60 or 90', 'weekdays']) {
+      expect(p).toContain(part);
+    }
+    expect(p).toMatch(/cannot start it yourself/);
+  });
+
+  it('says so when a list is empty, so the agent does not make ids up', () => {
+    expect(buildAutopilotChatPrompt({ ...input, accounts: [] })).toContain('(none available)');
   });
 });
