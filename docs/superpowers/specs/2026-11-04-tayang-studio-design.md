@@ -304,3 +304,21 @@ Before planning, this document gets a builder check: a fresh reader looks for ga
 ### Not now
 - Automatic posting to TikTok/Reels/Shorts (later, likely tayang.app).
 - .ics export.
+
+## Your own API (owner request, 2026-11-09)
+
+**Why.** Many creators have no Claude or ChatGPT plan and no agent installed. They only hold an API key: DeepSeek, a 9router running on their laptop, or a CommandCode Pro plan. They get stuck at "Connect your agent". They also don't want to install a CLI or see the word "Claude".
+
+**What the user sees.** The fifth row of Connect your agent (and of Settings › Agents), until now the empty "other agent" slot (`custom`), becomes **Your API** ("API sendiri"). Setting it up is one dialog with three steps:
+1. **Pick a provider:** DeepSeek, 9router, CommandCode or Other (any OpenAI-compatible address). 9router is marked "running on this computer" when `localhost:20128` answers.
+2. **Paste the key** (with a "get a key" link for each provider) **and pick a model** from the list the provider returns for that key.
+3. **Test:** the same call that lists the models checks the key. A failure is told in plain words: wrong key, no balance, plan too low (CommandCode's `upgrade_required`), or 9router not running.
+
+The key is stored in the OS keychain (same store as the Tayang sign-in), never in SQLite and never sent to Tayang's API. Provider, address and model are ordinary settings.
+
+**The engine (owner decision: no agent built into Tayang).** Behind "Your API" runs a pinned release of opencode (open source, MIT), downloaded by Tayang into its app-data folder the first time it is needed (about 65–80 MB, progress shown in the dialog). The user never runs or configures opencode:
+- Tayang starts `opencode acp` with `OPENCODE_CONFIG_CONTENT` holding one provider (`@ai-sdk/openai-compatible`, the base URL, the model) and the key in an env var, plus `OPENCODE_CONFIG_DIR` pointing at Tayang's own folder so the user's own opencode setup is not read. Auto-update, opencode's free models and its Claude Code imports are turned off.
+- Everything else (skills as first-prompt text, auto mode, render detection, model errors from opencode's log) is the opencode path that already exists.
+- An agent error that is an auth error says the API key was refused and opens the dialog, instead of "sign in to your agent".
+
+**Not now.** Several saved APIs at once, per-chat switching between an agent and an API, Anthropic-format endpoints, checksum pinning of the engine download (it comes over HTTPS from the official release of a pinned tag).
