@@ -934,9 +934,23 @@ pub struct AuthStart {
 #[serde(rename_all = "camelCase")]
 pub struct Checkout {
     pub order_id: String,
+    /// `GET /pay/<orderId>` on the API, which redirects to the provider: the only link opened.
+    #[serde(default)]
+    pub pay_url: String,
     pub payment_link_url: String,
     pub expires_at: String,
     pub amount: u64,
+}
+
+/// What `billing_checkout()` started: a QRIS page, or (while payments are off and the owner sells
+/// over WhatsApp) a WhatsApp chat to buy the plan. Tagged by `kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind")]
+pub enum CheckoutStart {
+    #[serde(rename = "qris")]
+    Qris(Checkout),
+    #[serde(rename = "whatsapp")]
+    Whatsapp { url: String },
 }
 
 /// A started payment that hasn't been paid or run out yet.
@@ -945,6 +959,9 @@ pub struct Checkout {
 pub struct PendingPayment {
     pub order_id: String,
     pub plan: String,
+    /// `GET /pay/<orderId>` on the API.
+    #[serde(default)]
+    pub pay_url: String,
     pub payment_link_url: String,
     pub expires_at: String,
 }

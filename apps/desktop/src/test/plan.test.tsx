@@ -94,7 +94,7 @@ describe('plan card', () => {
   it('a payment still waiting: Continue payment opens the plans screen (which resumes it)', async () => {
     vi.mocked(billing.billingStatus).mockResolvedValue({
       ...free,
-      pending: { orderId: 'TYG-A', plan: 'pro', paymentLinkUrl: 'https://pay.sumopod.com/p/1', expiresAt: '2026-11-04T13:00:00.000Z' },
+      pending: { orderId: 'TYG-A', plan: 'pro', payUrl: 'https://studio.tayang.app/api/pay/TYG-A', paymentLinkUrl: 'https://pay.sumopod.com/p/1', expiresAt: '2026-11-04T13:00:00.000Z' },
     });
     render(<PlanCard />);
     await userEvent.click(await screen.findByRole('button', { name: 'Continue payment' }));

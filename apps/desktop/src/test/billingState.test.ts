@@ -8,14 +8,14 @@ vi.mock('@/lib/billing', async (importOriginal) => ({
 }));
 
 import * as billing from '@/lib/billing';
-import { POLL_MS } from '@/lib/billing';
+import { POLL_LIMIT_MS, POLL_MS, WHATSAPP_POLL_MS } from '@/lib/billing';
 import { useAuth } from '@/state/auth';
 import { useBilling } from '@/state/billing';
 
 const NOW = new Date('2026-11-04T12:00:00.000Z');
 const free: BillingStatus = { plan: 'free', lastPlan: null, currentPeriodEnd: null, active: false, pending: null, lastPaidOrderId: null };
 const creator: BillingStatus = { plan: 'creator', lastPlan: 'creator', currentPeriodEnd: '2026-12-04T12:00:00.000Z', active: true, pending: null, lastPaidOrderId: null };
-const checkout = { orderId: 'TYG-A', paymentLinkUrl: 'https://pay.sumopod.com/p/1', expiresAt: '2026-11-04T13:00:00.000Z', amount: 50000 };
+const checkout = { kind: 'qris' as const, orderId: 'TYG-A', payUrl: 'https://studio.tayang.app/api/pay/TYG-A', paymentLinkUrl: 'https://pay.sumopod.com/p/1', expiresAt: '2026-11-04T13:00:00.000Z', amount: 50000 };
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -28,6 +28,46 @@ beforeEach(() => {
 afterEach(() => {
   useBilling.getState().close();
   vi.useRealTimers();
+});
+
+describe('buying over WhatsApp while payments are off', () => {
+  const wa = { kind: 'whatsapp' as const, url: 'https://studio.tayang.app/api/buy/whatsapp?plan=creator' };
+
+  it('shows the WhatsApp step, and moves to done once the owner activates the plan', async () => {
+    vi.mocked(billing.billingCheckout).mockResolvedValue(wa);
+    await useBilling.getState().pay('creator');
+    expect(useBilling.getState().flow).toEqual({ phase: 'whatsapp', plan: 'creator', url: wa.url, endBefore: null });
+    vi.mocked(billing.billingStatus).mockClear();
+    await vi.advanceTimersByTimeAsync(WHATSAPP_POLL_MS * 2);
+    expect(billing.billingStatus).toHaveBeenCalledTimes(2);
+    expect(useBilling.getState().flow.phase).toBe('whatsapp');
+    vi.mocked(billing.billingStatus).mockResolvedValue(creator);
+    await vi.advanceTimersByTimeAsync(WHATSAPP_POLL_MS);
+    expect(useBilling.getState().flow).toEqual({ phase: 'done', plan: 'creator', currentPeriodEnd: creator.currentPeriodEnd });
+  });
+
+  it('a renewal waits for the end to move, and asking stops after the limit (the step stays)', async () => {
+    vi.mocked(billing.billingStatus).mockResolvedValue(creator);
+    vi.mocked(billing.billingCheckout).mockResolvedValue(wa);
+    await useBilling.getState().pay('creator');
+    await vi.advanceTimersByTimeAsync(WHATSAPP_POLL_MS * 3);
+    expect(useBilling.getState().flow.phase).toBe('whatsapp');
+    vi.mocked(billing.billingStatus).mockClear();
+    await vi.advanceTimersByTimeAsync(POLL_LIMIT_MS);
+    const asked = vi.mocked(billing.billingStatus).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(WHATSAPP_POLL_MS * 4);
+    expect(vi.mocked(billing.billingStatus).mock.calls.length).toBe(asked);
+    expect(useBilling.getState().flow.phase).toBe('whatsapp');
+  });
+
+  it('closing stops asking', async () => {
+    vi.mocked(billing.billingCheckout).mockResolvedValue(wa);
+    await useBilling.getState().pay('lite');
+    useBilling.getState().close();
+    vi.mocked(billing.billingStatus).mockClear();
+    await vi.advanceTimersByTimeAsync(WHATSAPP_POLL_MS * 3);
+    expect(billing.billingStatus).not.toHaveBeenCalled();
+  });
 });
 
 describe('the plans flow', () => {
@@ -84,13 +124,13 @@ describe('the plans flow', () => {
   it('resumes a pending payment straight into waiting, without a new checkout', async () => {
     vi.mocked(billing.billingStatus).mockResolvedValue({
       ...free,
-      pending: { orderId: 'TYG-P', plan: 'pro', paymentLinkUrl: checkout.paymentLinkUrl, expiresAt: checkout.expiresAt },
+      pending: { orderId: 'TYG-P', plan: 'pro', payUrl: 'https://studio.tayang.app/api/pay/TYG-P', paymentLinkUrl: checkout.paymentLinkUrl, expiresAt: checkout.expiresAt },
     });
     await useBilling.getState().enter();
     expect(useBilling.getState().flow).toMatchObject({
       phase: 'waiting',
       plan: 'pro',
-      checkout: { orderId: 'TYG-P', paymentLinkUrl: checkout.paymentLinkUrl, expiresAt: checkout.expiresAt, amount: 90000 },
+      checkout: { orderId: 'TYG-P', payUrl: 'https://studio.tayang.app/api/pay/TYG-P', paymentLinkUrl: checkout.paymentLinkUrl, expiresAt: checkout.expiresAt, amount: 90000 },
     });
     expect(billing.billingCheckout).not.toHaveBeenCalled();
   });
@@ -98,7 +138,7 @@ describe('the plans flow', () => {
   it('never resumes a pending link for a plan below the one running (review3 I-2)', async () => {
     vi.mocked(billing.billingStatus).mockResolvedValue({
       ...creator,
-      pending: { orderId: 'TYG-L', plan: 'lite', paymentLinkUrl: checkout.paymentLinkUrl, expiresAt: checkout.expiresAt },
+      pending: { orderId: 'TYG-L', plan: 'lite', payUrl: 'https://studio.tayang.app/api/pay/TYG-L', paymentLinkUrl: checkout.paymentLinkUrl, expiresAt: checkout.expiresAt },
     });
     await useBilling.getState().enter();
     expect(useBilling.getState().flow).toEqual({ phase: 'picking' });
@@ -156,8 +196,8 @@ describe('the plans flow', () => {
     expect(useBilling.getState().flow.phase).toBe('closed');
   });
 
-  it('a link off the payment hosts fails as bad_link and is never waited on (M5)', async () => {
-    vi.mocked(billing.billingCheckout).mockResolvedValueOnce({ ...checkout, paymentLinkUrl: 'https://pay.example/p/1' });
+  it('a checkout without a pay link fails as bad_link and is never waited on (M5)', async () => {
+    vi.mocked(billing.billingCheckout).mockResolvedValueOnce({ ...checkout, payUrl: '' });
     await useBilling.getState().pay('lite');
     expect(useBilling.getState().flow).toEqual({ phase: 'failed', plan: 'lite', error: 'bad_link' });
   });

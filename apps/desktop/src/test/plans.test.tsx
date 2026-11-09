@@ -7,6 +7,7 @@ vi.mock('@/lib/billing', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/billing')>()),
   billingCheckout: vi.fn(),
   billingStatus: vi.fn(),
+  billingOpen: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/auth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/auth')>()),
@@ -27,7 +28,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { setUiLanguage } from '@/i18n';
 import * as auth from '@/lib/auth';
 import * as billing from '@/lib/billing';
-import { POLL_MS } from '@/lib/billing';
+import { POLL_MS, WHATSAPP_POLL_MS } from '@/lib/billing';
 import { fireConfetti, prefersReducedMotion } from '@/lib/confetti';
 import { show } from '@/lib/scheduler';
 import { Plans, clock } from '@/screens/Plans';
@@ -38,7 +39,7 @@ import { useBilling } from '@/state/billing';
 const NOW = new Date('2026-11-04T12:00:00.000Z');
 const free: BillingStatus = { plan: 'free', lastPlan: null, currentPeriodEnd: null, active: false, pending: null, lastPaidOrderId: null };
 const creator: BillingStatus = { plan: 'creator', lastPlan: 'creator', currentPeriodEnd: '2026-12-04T12:00:00.000Z', active: true, pending: null, lastPaidOrderId: null };
-const checkout = { orderId: 'TYG-A', paymentLinkUrl: 'https://pay.sumopod.com/p/1', expiresAt: '2026-11-04T13:00:00.000Z', amount: 50000 };
+const checkout = { kind: 'qris' as const, orderId: 'TYG-A', payUrl: 'https://studio.tayang.app/api/pay/TYG-A', paymentLinkUrl: 'https://pay.sumopod.com/p/1', expiresAt: '2026-11-04T13:00:00.000Z', amount: 50000 };
 const signedIn: AuthStatus = {
   state: 'signed-in',
   signedIn: true,
@@ -70,7 +71,7 @@ async function toPayStep(u = user()) {
   render(<Plans from="settings" />);
   await u.click(await screen.findByRole('radio', { name: 'Creator' }));
   await u.click(screen.getByRole('button', { name: 'Continue to payment' }));
-  expect(await screen.findByRole('heading', { level: 1, name: 'Pay with QRIS' })).toHaveFocus();
+  expect(await screen.findByRole('heading', { level: 1, name: 'Payment' })).toHaveFocus();
   return u;
 }
 
@@ -166,9 +167,9 @@ describe('plans screen: choose', () => {
     await u.click(await screen.findByRole('button', { name: 'Sign in with Google first' }));
     vi.mocked(billing.billingStatus).mockResolvedValue({ ...creator, lastPaidOrderId: 'TYG-OLD' });
     act(() => useAuth.getState().apply(signedIn));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Pay with QRIS' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Payment' })).toBeInTheDocument();
     expect(screen.getByText('Extended until Jan 3, 2027')).toBeInTheDocument();
-    await u.click(screen.getByRole('button', { name: 'Open the QRIS page' }));
+    await u.click(screen.getByRole('button', { name: 'Pay now' }));
     await screen.findByText(/this page changes by itself/);
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS * 2));
     expect(screen.getByText(/this page changes by itself/)).toBeInTheDocument();
@@ -182,7 +183,7 @@ describe('plans screen: choose', () => {
     render(<Plans from="settings" />);
     await screen.findByText('Your plan');
     await u.click(screen.getByRole('button', { name: 'Renew' }));
-    await u.click(await screen.findByRole('button', { name: 'Open the QRIS page' }));
+    await u.click(await screen.findByRole('button', { name: 'Pay now' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Available after your Creator plan ends');
   });
 
@@ -193,6 +194,21 @@ describe('plans screen: choose', () => {
     expect(await screen.findByText('Bisa dipilih setelah paket Creator berakhir')).toBeInTheDocument();
     expect(screen.getByText('Paket kamu')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Perpanjang' })).toBeInTheDocument();
+  });
+
+  it('while payments are off: continues in WhatsApp, Open WhatsApp again asks again, and the plan shows once activated', async () => {
+    const wa = { kind: 'whatsapp' as const, url: 'https://studio.tayang.app/api/buy/whatsapp?plan=creator' };
+    vi.mocked(billing.billingCheckout).mockResolvedValue(wa);
+    const u = user();
+    await toPayStep(u);
+    await u.click(screen.getByRole('button', { name: 'Pay now' }));
+    expect(await screen.findByText('Continue in WhatsApp')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/over WhatsApp/);
+    await u.click(screen.getByRole('button', { name: 'Open WhatsApp again' }));
+    expect(billing.billingCheckout).toHaveBeenCalledTimes(2);
+    vi.mocked(billing.billingStatus).mockResolvedValue(creator);
+    await act(() => vi.advanceTimersByTimeAsync(WHATSAPP_POLL_MS));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Creator plan active' })).toBeInTheDocument();
   });
 
   it('in Indonesian', async () => {
@@ -221,24 +237,24 @@ describe('plans screen: choose', () => {
     // The sign-in dialog is over the screen, which is still on step 1.
     expect(screen.getByRole('heading', { level: 1, name: 'Let Tayang do the posting', hidden: true })).toBeInTheDocument();
     act(() => useAuth.getState().apply(signedIn));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Pay with QRIS' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Payment' })).toBeInTheDocument();
     expect(billing.billingCheckout).not.toHaveBeenCalled();
   });
 });
 
 describe('plans screen: pay', () => {
-  it('summary, then Open the QRIS page checks out, waits with a countdown, and Open again reopens it', async () => {
+  it('summary, then Pay now checks out, waits with a countdown, and Open again reopens it', async () => {
     const u = await toPayStep();
     expect(screen.getByText('Creator plan')).toBeInTheDocument();
     expect(screen.getByText('Active for 30 days from when the payment arrives')).toBeInTheDocument();
-    await u.click(screen.getByRole('button', { name: 'Open the QRIS page' }));
+    await u.click(screen.getByRole('button', { name: 'Pay now' }));
     expect(billing.billingCheckout).toHaveBeenCalledWith('creator');
     expect(await screen.findByText(/this page changes by itself/)).toBeInTheDocument();
     expect(screen.getByText(/^Link expires in (1:00:00|59:5\d)$/)).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(2000));
     expect(screen.getByText('Waiting for 0:02')).toBeInTheDocument();
     await u.click(screen.getByRole('button', { name: 'Open again' }));
-    expect(openUrl).toHaveBeenCalledWith(checkout.paymentLinkUrl);
+    expect(billing.billingOpen).toHaveBeenCalledWith(checkout.payUrl);
   });
 
   it('renewing previews the new end date', async () => {
@@ -305,7 +321,7 @@ describe('plans screen: pay', () => {
 
   it('when the link expires: Link expired, and Make a new link checks out again', async () => {
     const u = await toPayStep();
-    await u.click(screen.getByRole('button', { name: 'Open the QRIS page' }));
+    await u.click(screen.getByRole('button', { name: 'Pay now' }));
     await screen.findByText(/this page changes by itself/);
     await act(() => vi.advanceTimersByTimeAsync(60 * 60_000 + POLL_MS));
     expect(await screen.findByText('Link expired')).toBeInTheDocument();
@@ -318,10 +334,10 @@ describe('plans screen: pay', () => {
   it('entering with a pending payment goes straight to waiting on it', async () => {
     vi.mocked(billing.billingStatus).mockResolvedValue({
       ...free,
-      pending: { orderId: 'TYG-P', plan: 'pro', paymentLinkUrl: checkout.paymentLinkUrl, expiresAt: checkout.expiresAt },
+      pending: { orderId: 'TYG-P', plan: 'pro', payUrl: 'https://studio.tayang.app/api/pay/TYG-P', paymentLinkUrl: checkout.paymentLinkUrl, expiresAt: checkout.expiresAt },
     });
     render(<Plans from="settings" />);
-    expect(await screen.findByRole('heading', { level: 1, name: 'Pay with QRIS' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Payment' })).toBeInTheDocument();
     expect(screen.getByText('Pro plan')).toBeInTheDocument();
     expect(screen.getByText(/this page changes by itself/)).toBeInTheDocument();
     expect(billing.billingCheckout).not.toHaveBeenCalled();
@@ -330,7 +346,7 @@ describe('plans screen: pay', () => {
   it('shows why a checkout failed, e.g. payments not open yet', async () => {
     vi.mocked(billing.billingCheckout).mockRejectedValueOnce('billing:unavailable');
     const u = await toPayStep();
-    await u.click(screen.getByRole('button', { name: 'Open the QRIS page' }));
+    await u.click(screen.getByRole('button', { name: 'Pay now' }));
     expect(await screen.findByRole('alert')).toHaveTextContent("Payments aren't available yet");
   });
 });
@@ -345,7 +361,7 @@ describe('plans screen: leaving', () => {
 
   it('Esc leaves at once, but asks first while a payment is waiting', async () => {
     const u = await toPayStep();
-    await u.click(screen.getByRole('button', { name: 'Open the QRIS page' }));
+    await u.click(screen.getByRole('button', { name: 'Pay now' }));
     await screen.findByText(/this page changes by itself/);
     await u.keyboard('{Escape}');
     const confirm = await screen.findByRole('dialog');
@@ -368,7 +384,7 @@ describe('plans screen: leaving', () => {
 describe('plans screen: done', () => {
   async function payAndSucceed() {
     const u = await toPayStep();
-    await u.click(screen.getByRole('button', { name: 'Open the QRIS page' }));
+    await u.click(screen.getByRole('button', { name: 'Pay now' }));
     await screen.findByText(/this page changes by itself/);
     vi.mocked(billing.billingStatus).mockResolvedValue({ ...creator, lastPaidOrderId: 'TYG-A' });
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
@@ -453,7 +469,7 @@ describe('plans screen: done', () => {
     render(<Plans from="settings" />);
     await u.click(await screen.findByRole('radio', { name: 'Creator' }));
     await u.click(screen.getByRole('button', { name: 'Lanjut bayar' }));
-    await u.click(await screen.findByRole('button', { name: 'Buka halaman QRIS' }));
+    await u.click(await screen.findByRole('button', { name: 'Bayar sekarang' }));
     expect(await screen.findByText(/halaman ini berubah sendiri begitu pembayaranmu masuk/)).toBeInTheDocument();
     vi.mocked(billing.billingStatus).mockResolvedValue({ ...creator, lastPaidOrderId: 'TYG-A' });
     await act(() => vi.advanceTimersByTimeAsync(POLL_MS));

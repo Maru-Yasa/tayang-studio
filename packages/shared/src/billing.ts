@@ -93,6 +93,9 @@ export interface CheckoutRequest {
 /** POST /v1/billing/checkout, 200: open `paymentLinkUrl` to pay with QRIS. */
 export interface CheckoutResponse {
   orderId: string;
+  /** GET /pay/<orderId> on the API, which redirects to the provider's page: what the app opens. */
+  payUrl: string;
+  /** The provider's page itself. Kept for apps that predate payUrl. */
   paymentLinkUrl: string;
   expiresAt: string;
   amount: number;
@@ -102,6 +105,8 @@ export interface CheckoutResponse {
 export interface PendingPayment {
   orderId: string;
   plan: PaidPlanId;
+  /** GET /pay/<orderId> on the API. */
+  payUrl: string;
   paymentLinkUrl: string;
   expiresAt: string;
 }

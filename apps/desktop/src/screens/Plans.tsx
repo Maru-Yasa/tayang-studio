@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, QrCode } from 'lucide-react';
+import { ArrowLeft, MessageCircle, QrCode } from 'lucide-react';
 import { Spinner } from '@/components/Loading';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { PLANS, findPlan, isLowerPlan, nextPeriod, type PaidPlanId, type Plan } from '@tayang/shared';
 import logo from '@/assets/brand/tayang-horizontal-reversed-color.svg';
 import { SignInDialog } from '@/components/Account';
@@ -13,7 +12,7 @@ import { StepBar } from '@/components/StepBar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { uiLanguage } from '@/i18n';
-import { formatDay, formatIdr, isPaymentLink } from '@/lib/billing';
+import { billingOpen, formatDay, formatIdr } from '@/lib/billing';
 import { fireConfetti, prefersReducedMotion, CONFETTI_COLORS } from '@/lib/confetti';
 import { canNotify, show } from '@/lib/scheduler';
 import { cn } from '@/lib/utils';
@@ -184,9 +183,8 @@ function PayStep({ flow, onLeave }: { flow: Exclude<PayFlow, { phase: 'closed' |
           : t('billing.errors.unexpected', { message: flow.error.message })
         : null;
   const openAgain = (url: string) => {
-    // Same check as Rust: only SumoPod's payment pages are opened.
-    if (isPaymentLink(url)) void openUrl(url).catch(() => {});
-    else setLinkError(true);
+    // Rust opens it, only if it is a pay link on this API.
+    billingOpen(url).catch(() => setLinkError(true));
   };
 
   return (
@@ -204,6 +202,18 @@ function PayStep({ flow, onLeave }: { flow: Exclude<PayFlow, { phase: 'closed' |
           <p className="m-0 flex flex-wrap justify-center gap-x-4 font-mono text-xs text-text-3">
             <span>{t('plans.pay.elapsed', { time: clock(now - flow.startedAt) })}</span>
             <span>{t('plans.pay.expiresIn', { time: clock(Date.parse(flow.checkout.expiresAt) - now) })}</span>
+          </p>
+        </div>
+      )}
+      {flow.phase === 'whatsapp' && (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-background px-6 py-8 text-center">
+          <span aria-hidden="true" className="relative flex size-16 items-center justify-center rounded-xl bg-raised">
+            <MessageCircle size={32} strokeWidth={1.5} className="text-foreground" />
+            <span className="absolute inset-0 rounded-xl border border-primary motion-safe:animate-pulse" />
+          </span>
+          <span className="text-sm font-medium">{t('plans.pay.whatsappTitle')}</span>
+          <p role="status" className="m-0 max-w-[420px] text-sm leading-normal text-text-2">
+            {t('plans.pay.whatsappBody')}
           </p>
         </div>
       )}
@@ -231,11 +241,17 @@ function PayStep({ flow, onLeave }: { flow: Exclude<PayFlow, { phase: 'closed' |
           </Button>
         )}
         {flow.phase === 'waiting' && (
-          <Button variant="secondary" onClick={() => openAgain(flow.checkout.paymentLinkUrl)}>
+          <Button variant="secondary" onClick={() => openAgain(flow.checkout.payUrl)}>
             {t('plans.pay.openAgain')}
           </Button>
         )}
         {flow.phase === 'expired' && <Button onClick={() => void pay(plan.id)}>{t('plans.pay.newLink')}</Button>}
+        {flow.phase === 'whatsapp' && (
+          // Asks the API again: Rust checks the link and opens it.
+          <Button variant="secondary" onClick={() => void pay(plan.id)}>
+            {t('plans.pay.whatsappAgain')}
+          </Button>
+        )}
         <Button variant="ghost" onClick={back}>
           {t('plans.pay.changePlan')}
         </Button>

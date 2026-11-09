@@ -4,8 +4,15 @@ import type { BillingStatus, CheckoutResponse, PaidPlanId, UiLanguage } from '@t
 // Paid plans. Rust calls the API with the stored sign-in token; the webview only ever sees the
 // payment link and the plan state.
 
-/** Starts (or reuses) a QRIS payment and opens it in the browser. Rejects with `billing:<code>`. */
-export const billingCheckout = (plan: PaidPlanId) => invoke<CheckoutResponse>('billing_checkout', { plan });
+/**
+ * What starting a payment did: a QRIS page, or, while payments are off and the owner sells over
+ * WhatsApp, the API's buy link (`/buy/whatsapp`, which goes on to the chat). Rust checks either link
+ * before opening it.
+ */
+export type CheckoutStart = ({ kind: 'qris' } & CheckoutResponse) | { kind: 'whatsapp'; url: string };
+
+/** Starts (or reuses) a payment and opens it in the browser. Rejects with `billing:<code>`. */
+export const billingCheckout = (plan: PaidPlanId) => invoke<CheckoutStart>('billing_checkout', { plan });
 /** The signed-in account's plan and any payment in progress. Rejects with `billing:<code>`. */
 export const billingStatus = () => invoke<BillingStatus>('billing_status');
 
@@ -58,6 +65,8 @@ export function planCard(s: BillingStatus | null): PlanCardState {
 
 /** The plan-ends-soon notification shows this long before the end. */
 export const REMINDER_LEAD_MS = 3 * 86_400_000;
+/** While a WhatsApp purchase waits for the owner to activate it, status is asked this often… */
+export const WHATSAPP_POLL_MS = 15_000;
 /** While the payment dialog waits, status is asked this often… */
 export const POLL_MS = 5_000;
 /** …for at most this long. */
@@ -71,5 +80,5 @@ export function billingReminderDue(s: BillingStatus | null, now: Date, remindedF
   return end - now.getTime() <= REMINDER_LEAD_MS && remindedFor !== s.currentPeriodEnd;
 }
 
-/** Only SumoPod's payment pages are opened (shared allow-list; Rust checks the same hosts). */
-export { isPaymentLink } from '@tayang/shared';
+/** "Open again": Rust opens a pay link only if it is on this API (`<api>/pay/…`). Rejects with `billing:bad_link`. */
+export const billingOpen = (url: string) => invoke<void>('billing_open', { url });

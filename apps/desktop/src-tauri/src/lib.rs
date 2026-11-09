@@ -198,6 +198,7 @@ pub fn run() {
             commands::auth_status,
             commands::auth_logout,
             commands::billing_checkout,
+            commands::billing_open,
             commands::billing_status,
         ])
         .build(tauri::generate_context!())
