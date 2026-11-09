@@ -472,6 +472,7 @@ export const en = {
     modelDefault: 'Default model',
     findModel: 'Find a model',
     loadingModels: 'Asking {{agent}} for its models…',
+    refreshingModels: 'Updating the list…',
     noModels: "This agent doesn't offer a choice of model",
     noModelMatch: 'No model matches',
     modelsFailed: "Couldn't list the models: {{message}}",

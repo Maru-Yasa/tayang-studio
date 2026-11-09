@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { ArrowUp, AtSign, Check, ChevronDown, File as FileIcon, Palette, Paperclip, Square, X, Zap } from 'lucide-react';
+import { ArrowUp, AtSign, Check, ChevronDown, File as FileIcon, Loader2, Palette, Paperclip, Square, X, Zap } from 'lucide-react';
 import type { AgentId, AgentInfo, MessagePart, Project, Style } from '@tayang/shared';
 import { AgentLogo } from '@/components/AgentLogo';
 import { FrameChip } from '@/components/MessageList';
@@ -204,7 +204,11 @@ export function ModelPicker({ agent, chatId, disabled }: { agent: AgentId; chatI
             className={cn(ICON_BUTTON, 'w-auto max-w-44 px-1.5 text-[12px]')}
           >
             <span className="truncate">{label}</span>
-            <ChevronDown size={12} strokeWidth={1.5} aria-hidden="true" className="shrink-0" />
+            {loading ? (
+              <Loader2 size={12} strokeWidth={1.5} aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" />
+            ) : (
+              <ChevronDown size={12} strokeWidth={1.5} aria-hidden="true" className="shrink-0" />
+            )}
           </button>
         </PopoverTrigger>
       </Tip>
@@ -213,9 +217,25 @@ export function ModelPicker({ agent, chatId, disabled }: { agent: AgentId; chatI
           <CommandInput placeholder={t('composer.findModel')} />
           <CommandList className="max-h-72">
             {loading && !options.length ? (
-              <p className="m-0 px-3 py-3 text-xs text-text-3">{t('composer.loadingModels', { agent: AGENT_NAMES[agent] })}</p>
+              <div role="status" aria-busy="true" className="flex flex-col gap-1 px-1 py-1">
+                <span className="flex items-center gap-2 px-2 py-2 text-xs text-text-3">
+                  <Loader2 size={13} strokeWidth={1.5} aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" />
+                  {t('composer.loadingModels', { agent: AGENT_NAMES[agent] })}
+                </span>
+                {[72, 56, 64, 48].map((w) => (
+                  <span key={w} aria-hidden="true" className="flex h-9 items-center px-2">
+                    <span className="h-3 animate-pulse rounded bg-raised motion-reduce:animate-none" style={{ width: `${w}%` }} />
+                  </span>
+                ))}
+              </div>
             ) : (
               <>
+                {loading && (
+                  <span role="status" className="flex items-center gap-2 px-3 pt-2 pb-1 text-[11px] text-text-3">
+                    <Loader2 size={12} strokeWidth={1.5} aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" />
+                    {t('composer.refreshingModels')}
+                  </span>
+                )}
                 <CommandEmpty>{t('composer.noModelMatch')}</CommandEmpty>
                 {!options.length && <p className="m-0 px-3 pt-3 pb-1 text-xs text-text-3">{t('composer.noModels')}</p>}
                 <CommandItem value="__default" onSelect={() => void choose(null)} className="h-9 gap-2 text-[13px]">

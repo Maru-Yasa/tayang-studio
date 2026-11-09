@@ -73,6 +73,20 @@ describe('ModelPicker', () => {
     expect(JSON.parse(localStorage.getItem('tayang.agentModels')!).custom).toBeUndefined();
   });
 
+  it('shows a loading state while the agent is asked for its models', async () => {
+    let answer: (v: { current: string | null; options: typeof OPTIONS }) => void = () => {};
+    vi.mocked(ipc.agentModels).mockReturnValue(new Promise((r) => (answer = r)));
+    picker();
+    await userEvent.click(screen.getByRole('button', { name: /^Model:/ }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveAttribute('aria-busy', 'true');
+    expect(status).toHaveTextContent('Asking opencode for its models…');
+    expect(screen.queryByRole('option', { name: 'Big Pickle' })).not.toBeInTheDocument();
+    await act(async () => answer({ current: null, options: OPTIONS }));
+    expect(await screen.findByRole('option', { name: 'Big Pickle' })).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
   it('filters by name, so the free ones are easy to find', async () => {
     useModels.setState({ byAgent: { opencode: { current: null, options: OPTIONS } } });
     picker();

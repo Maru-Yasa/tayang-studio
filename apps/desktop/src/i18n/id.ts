@@ -472,6 +472,7 @@ export const id: Translations = {
     modelDefault: 'Model bawaan',
     findModel: 'Cari model',
     loadingModels: 'Menanyakan daftar model ke {{agent}}…',
+    refreshingModels: 'Memperbarui daftar…',
     noModels: 'Agen ini tidak memberi pilihan model',
     noModelMatch: 'Tidak ada model yang cocok',
     modelsFailed: 'Gagal memuat daftar model: {{message}}',
