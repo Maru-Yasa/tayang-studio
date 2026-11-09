@@ -2,6 +2,21 @@
 
 Tayang Studio is a free, open-source desktop app that helps Indonesian creators make motion videos without writing prompts. It picks topics, writes scripts and handles the prompting, while the user's own AI agent (Claude Code, opencode, Gemini CLI, Codex or any ACP agent) does the building.
 
+![A Tayang Studio chat: the agent's plan and frame check on the left, the finished 3D cartoon video in the preview on the right](docs/screenshots/chat.webp)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/videos.webp" alt="Videos: every video made, with its status, length and schedule"><br><sub><b>Videos</b>: everything you've made, with status, length and schedule</sub></td>
+    <td width="50%"><img src="docs/screenshots/style.webp" alt="Style: built-in looks such as Cartoon 3D world, or copy one from a video"><br><sub><b>Style</b>: pick a built-in look or copy one from a TikTok, Reels or YouTube link</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/autopilot.webp" alt="Autopilot: videos made on a schedule"><br><sub><b>Autopilot</b>: Tayang makes videos on a schedule while you stay in charge</sub></td>
+    <td width="50%"><img src="docs/screenshots/calendar.webp" alt="Calendar: posted, ready and planned videos for the month"><br><sub><b>Calendar</b>: what's posted, ready to post and planned</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots use made-up projects.</sub>
+
 ## Install
 
 macOS and Linux:
