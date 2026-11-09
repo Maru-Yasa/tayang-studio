@@ -36,6 +36,12 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+// --crash: exits at start with an error on stderr, like an agent missing a runtime.
+if (process.argv.includes("--crash")) {
+  process.stderr.write("Error: cannot find module 'opencode-windows-x64'\n");
+  process.exit(1);
+}
+
 let nextId = 1;
 const pending = new Map();
 let sessionId = null;

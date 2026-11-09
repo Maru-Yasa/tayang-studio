@@ -10,7 +10,7 @@ use crate::types::{
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -226,12 +226,38 @@ async fn write_loop(mut stdin: ChildStdin, mut rx: mpsc::UnboundedReceiver<Strin
     }
 }
 
-/// The agent's stderr is diagnostics only: drain it so the pipe never fills.
-async fn drain_stderr(stderr: impl AsyncRead + Unpin, label: String) {
+/// How many of the agent's last stderr lines are kept, to say why it exited at start.
+const STDERR_TAIL: usize = 8;
+
+/// The agent's stderr is diagnostics only: drain it so the pipe never fills, keeping the last
+/// few lines in `tail`.
+async fn drain_stderr(stderr: impl AsyncRead + Unpin, label: String, tail: Arc<Mutex<VecDeque<String>>>) {
     let mut lines = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         eprintln!("[agent {label}] {line}");
+        let line = line.trim();
+        if !line.is_empty() {
+            let mut t = tail.lock().unwrap();
+            if t.len() == STDERR_TAIL {
+                t.pop_front();
+            }
+            t.push_back(line.to_string());
+        }
     }
+}
+
+/// "The agent exited before it was ready", with what it printed last, so the user (and we)
+/// can see why: a missing runtime, a crash, a bad config.
+fn exited_with(e: AcpError, tail: &VecDeque<String>) -> AcpError {
+    if e.0 != EXITED_MESSAGE || tail.is_empty() {
+        return e;
+    }
+    let said: Vec<&str> = tail.iter().map(String::as_str).collect();
+    let mut said = said.join(" | ");
+    if said.chars().count() > 400 {
+        said = format!("…{}", said.chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect::<String>());
+    }
+    AcpError(format!("{EXITED_MESSAGE}: {said}"))
 }
 
 #[cfg(windows)]
@@ -1172,9 +1198,11 @@ fn auth_message(e: &RpcError) -> String {
     format!("The agent needs you to sign in first ({})", e.message)
 }
 
+const EXITED_MESSAGE: &str = "The agent exited before it was ready";
+
 fn start_error(e: RpcError) -> AcpError {
     if e.is_closed() {
-        AcpError("The agent exited before it was ready".into())
+        AcpError(EXITED_MESSAGE.into())
     } else if e.code == AUTH_REQUIRED {
         AcpError(auth_message(&e))
     } else {
@@ -1321,7 +1349,8 @@ impl AgentSession {
             last_usage: Mutex::new(None),
         });
         tokio::spawn(write_loop(stdin, out_rx));
-        tokio::spawn(drain_stderr(stderr, chat_id.to_string()));
+        let tail = Arc::new(Mutex::new(VecDeque::new()));
+        let drain = tokio::spawn(drain_stderr(stderr, chat_id.to_string(), tail.clone()));
         let reader = tokio::spawn(read_loop(stdout, core.clone()));
         let (kill_tx, kill_rx) = oneshot::channel();
         let supervisor = tokio::spawn(supervise(child, kill_rx, reader, core.clone()));
@@ -1349,7 +1378,10 @@ impl AgentSession {
             }
             Ok(Err(e)) => {
                 session.shutdown().await;
-                Err(e)
+                // The process is gone; give its last stderr lines a moment to arrive.
+                let _ = tokio::time::timeout(Duration::from_millis(500), drain).await;
+                let tail = tail.lock().unwrap().clone();
+                Err(exited_with(e, &tail))
             }
             Err(_) => {
                 session.shutdown().await;

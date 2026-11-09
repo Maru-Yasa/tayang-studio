@@ -412,6 +412,19 @@ async fn auth_required_on_session_new_says_sign_in() {
 }
 
 #[tokio::test]
+async fn an_agent_that_exits_at_start_says_what_it_printed() {
+    let ws = workspace();
+    let manager = AcpManager::new();
+    let mut cmd = fake_agent();
+    cmd.push("--crash".into());
+    let err = manager
+        .start("c1", &cmd, &ws.cwd, Arc::new(RecordingSink::default()))
+        .await
+        .unwrap_err();
+    assert_eq!(err.0, "The agent exited before it was ready: Error: cannot find module 'opencode-windows-x64'");
+}
+
+#[tokio::test]
 async fn prompt_error_carries_the_agent_message() {
     let ws = workspace();
     let (manager, sink) = started("c1", &ws).await;
