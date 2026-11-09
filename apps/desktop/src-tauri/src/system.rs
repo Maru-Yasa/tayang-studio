@@ -63,6 +63,8 @@ pub fn tool_dirs(home: Option<&Path>, appdata: Option<&Path>) -> Vec<PathBuf> {
         // winget puts portable tools (ffmpeg, yt-dlp) behind links here.
         if let Some(h) = home {
             dirs.push(h.join("AppData").join("Local").join("Microsoft").join("WinGet").join("Links"));
+            // Antigravity CLI's installer puts `agy` here.
+            dirs.push(h.join("AppData").join("Local").join("agy").join("bin"));
         }
         // A winget install updates the stored PATH, not the one this app started with.
         dirs.extend(registry_path());
@@ -361,7 +363,7 @@ pub fn system_info(exec: &dyn Exec) -> SystemInfo {
 
 type AgentDef = (AgentId, &'static str, &'static str, &'static [&'static str]);
 
-const AGENT_DEFS: [AgentDef; 4] = [
+const AGENT_DEFS: [AgentDef; 5] = [
     (
         AgentId::Claude,
         "Claude Code",
@@ -371,6 +373,8 @@ const AGENT_DEFS: [AgentDef; 4] = [
     (AgentId::Opencode, "OpenCode", "opencode", &["opencode", "acp"]),
     (AgentId::Gemini, "Gemini CLI", "gemini", &["gemini", "--experimental-acp"]),
     (AgentId::Codex, "Codex", "codex", &["npx", "-y", "@zed-industries/codex-acp"]),
+    // Antigravity CLI speaks ACP itself since 1.5.0; its installer puts `agy` in ~/.local/bin.
+    (AgentId::Antigravity, "Antigravity CLI", "agy", &["agy", "acp"]),
 ];
 
 /// The command that starts this agent in ACP mode; `None` for `custom`.
@@ -822,12 +826,24 @@ mod tests {
         let ex = FakeExec::default().with("claude", "2.1.3 (Claude Code)");
         let a = detect_agents(&ex);
         let ids: Vec<_> = a.iter().map(|x| x.id).collect();
-        assert_eq!(ids, [AgentId::Claude, AgentId::Opencode, AgentId::Gemini, AgentId::Codex]);
+        assert_eq!(ids, [AgentId::Claude, AgentId::Opencode, AgentId::Gemini, AgentId::Codex, AgentId::Antigravity]);
         assert!(a[0].installed && a[0].recommended);
         assert_eq!(a[0].version.as_deref(), Some("2.1.3"));
         assert_eq!(a[0].acp_command, ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]);
         assert!(a[1..].iter().all(|x| !x.installed && x.version.is_none() && !x.recommended));
         assert_eq!(a[2].acp_command, ["gemini", "--experimental-acp"]);
+    }
+
+    #[test]
+    fn detect_antigravity_cli() {
+        let ex = FakeExec::default().with("agy", "1.5.3");
+        let a = detect_agents(&ex);
+        let agy = a.iter().find(|x| x.id == AgentId::Antigravity).unwrap();
+        assert!(agy.installed && !agy.recommended);
+        assert_eq!(agy.name, "Antigravity CLI");
+        assert_eq!(agy.version.as_deref(), Some("1.5.3"));
+        assert_eq!(agy.acp_command, ["agy", "acp"]);
+        assert_eq!(acp_command(AgentId::Antigravity).unwrap(), ["agy", "acp"]);
     }
 
     #[test]
