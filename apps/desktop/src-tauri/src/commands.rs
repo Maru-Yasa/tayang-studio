@@ -2097,11 +2097,17 @@ pub async fn api_save(
     if let Some(key) = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()) {
         keys.set(key).await?;
     }
-    let provider = crate::api_engine::ApiProvider { provider: provider.provider, base_url, model };
+    let mut models: Vec<String> = provider.models.iter().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect();
+    models.sort();
+    models.dedup();
+    let provider = crate::api_engine::ApiProvider { provider: provider.provider, base_url, model, models };
     *usage.0.lock().map_err(err)? = None;
+    // The model picked here is the one to use: forget a pick from the chat's model menu.
+    let mut agent_models = state.db.get_settings(&state.home).agent_models;
+    agent_models.remove("custom");
     state
         .db
-        .update_settings(serde_json::json!({ "apiProvider": provider, "defaultAgent": "custom" }))
+        .update_settings(serde_json::json!({ "apiProvider": provider, "defaultAgent": "custom", "agentModels": agent_models }))
         .map_err(err)
 }
 

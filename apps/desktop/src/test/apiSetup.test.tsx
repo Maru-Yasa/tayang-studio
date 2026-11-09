@@ -48,7 +48,7 @@ describe('ApiSetupDialog', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved));
     expect(ipc.apiTry).toHaveBeenCalledWith('https://api.deepseek.com', 'sk-123', 'deepseek-chat');
     expect(ipc.engineInstall).toHaveBeenCalled();
-    expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' }, 'sk-123');
+    expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', models: ['deepseek-chat', 'deepseek-reasoner'] }, 'sk-123');
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -99,7 +99,7 @@ describe('ApiSetupDialog', () => {
     await user.click(screen.getByRole('combobox', { name: 'Model' }));
     await user.click(screen.getByRole('option', { name: 'deepseek-reasoner' }));
     await user.click(screen.getByRole('button', { name: 'Save and connect' }));
-    await waitFor(() => expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner' }, null));
+    await waitFor(() => expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner', models: ['deepseek-chat', 'deepseek-reasoner'] }, null));
   });
 
   it('does not save when the real call fails, even if the model list loaded', async () => {

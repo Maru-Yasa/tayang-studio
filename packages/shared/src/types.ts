@@ -289,6 +289,8 @@ export interface ApiProvider {
   provider: ApiProviderId;
   baseUrl: string;
   model: string;
+  /** Every model the key can use, offered in the chat's model menu. */
+  models?: string[];
 }
 
 /** Why checking an API key failed. */

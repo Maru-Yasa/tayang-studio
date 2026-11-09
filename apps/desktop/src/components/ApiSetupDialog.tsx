@@ -230,7 +230,7 @@ export function ApiSetupDialog({
         return;
       }
       try {
-        const settings = await apiSave({ provider, baseUrl, model }, keyArg);
+        const settings = await apiSave({ provider, baseUrl, model, models: check?.models ?? [model] }, keyArg);
         track('agent connected', { agent: 'custom', provider });
         onSaved(settings);
         onOpenChange(false);

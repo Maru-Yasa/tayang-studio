@@ -29,6 +29,9 @@ pub struct ApiProvider {
     pub provider: String,
     pub base_url: String,
     pub model: String,
+    /// Every model the key can use (from the check), offered in the chat's model menu.
+    #[serde(default)]
+    pub models: Vec<String>,
 }
 
 /// Display names of the presets, for opencode's model menu.
@@ -188,13 +191,17 @@ pub async fn reachable(client: &reqwest::Client, base_url: &str) -> bool {
     client.get(models_url(base_url)).send().await.is_ok()
 }
 
-/// opencode's config for one provider, the model picked and nothing else.
+/// opencode's config: the one provider with its models, the picked one as default, and only that
+/// provider enabled (so opencode's own free models stay out of the model menu).
 pub fn opencode_config(p: &ApiProvider) -> Value {
     let mut models = serde_json::Map::new();
-    models.insert(p.model.clone(), json!({ "name": p.model }));
+    for m in p.models.iter().chain(std::iter::once(&p.model)) {
+        models.insert(m.clone(), json!({ "name": m }));
+    }
     json!({
         "$schema": "https://opencode.ai/config.json",
         "model": format!("{PROVIDER_ID}/{}", p.model),
+        "enabled_providers": [PROVIDER_ID],
         "autoupdate": false,
         "share": "disabled",
         "provider": {
@@ -375,7 +382,12 @@ mod tests {
     use super::*;
 
     fn deepseek() -> ApiProvider {
-        ApiProvider { provider: "deepseek".into(), base_url: "https://api.deepseek.com".into(), model: "deepseek-chat".into() }
+        ApiProvider {
+            provider: "deepseek".into(),
+            base_url: "https://api.deepseek.com".into(),
+            model: "deepseek-chat".into(),
+            models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+        }
     }
 
     #[test]
@@ -424,6 +436,10 @@ mod tests {
         assert_eq!(p["options"]["baseURL"], "https://api.deepseek.com");
         assert_eq!(p["options"]["apiKey"], "{env:TAYANG_PROVIDER_KEY}");
         assert!(p["models"]["deepseek-chat"].is_object());
+        assert!(p["models"]["deepseek-reasoner"].is_object());
+        assert_eq!(c["enabled_providers"], json!(["tayang"]));
+        let old = ApiProvider { models: Vec::new(), ..deepseek() };
+        assert_eq!(opencode_config(&old)["provider"]["tayang"]["models"].as_object().unwrap().len(), 1, "a saved provider without a list still has its model");
         assert!(!c.to_string().contains("sk-"), "the key never goes in the config");
     }
 
