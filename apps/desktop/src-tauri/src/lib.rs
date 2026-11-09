@@ -57,6 +57,8 @@ pub fn run() {
             media::sweep_study_dirs(std::path::Path::new(&working));
             app.manage(usage::UsageCache::default());
             app.manage(commands::ClaudeSignIn::default());
+            app.manage(commands::ApiKeys::new(&data));
+            app.manage(commands::EngineInstall::default());
             let api_url = styles_sync::effective_api_url(&settings);
             app.manage(AppState {
                 db,
@@ -99,6 +101,12 @@ pub fn run() {
             commands::get_system_info,
             commands::system_locale,
             commands::detect_agents,
+            commands::api_status,
+            commands::api_check,
+            commands::api_reachable,
+            commands::api_save,
+            commands::api_clear,
+            commands::engine_install,
             commands::check_tools,
             commands::claude_account,
             commands::claude_sign_in,

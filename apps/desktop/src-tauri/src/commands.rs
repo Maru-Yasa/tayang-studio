@@ -70,10 +70,12 @@ fn is_posix_default(l: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn detect_agents() -> CmdResult<Vec<AgentInfo>> {
-    tauri::async_runtime::spawn_blocking(|| system::detect_agents(&RealExec))
+pub async fn detect_agents(app: AppHandle) -> CmdResult<Vec<AgentInfo>> {
+    let mut agents = tauri::async_runtime::spawn_blocking(|| system::detect_agents(&RealExec))
         .await
-        .map_err(err)
+        .map_err(err)?;
+    agents.push(api_agent_info(&app).await);
+    Ok(agents)
 }
 
 #[tauri::command]
@@ -1162,7 +1164,7 @@ pub fn chat_kind(chat_id: &str, has_project: bool) -> &'static str {
 /// opencode logs a failed model call (a free model's usage limit) and then never answers the prompt:
 /// its log, for the session to watch. None for other agents.
 fn error_log(agent: AgentId) -> Option<PathBuf> {
-    if agent != AgentId::Opencode {
+    if !matches!(agent, AgentId::Opencode | AgentId::Custom) {
         return None;
     }
     let home = crate::system::home_dir()?;
@@ -1293,11 +1295,7 @@ pub async fn agent_start(
     agent_id: AgentId,
     auto: Option<bool>,
 ) -> CmdResult<bool> {
-    let mut command = system::acp_command(agent_id)
-        .ok_or("Pick an agent first: custom agents have no start command yet")?;
-    let program = command[0].clone();
-    let found = system::agent_program(&RealExec, agent_id).ok_or_else(|| format!("Can't find {program} on this computer"))?;
-    command[0] = found.to_string_lossy().into_owned();
+    let (command, launch_env) = agent_launch(&app, agent_id).await?;
     let folder = project_folder_for_chat(&state, &chat_id)?;
     let cwd = resolve_cwd(&state.working(), &chat_id, folder.as_deref())?;
     let resource_dir = app.path().resource_dir().ok();
@@ -1309,6 +1307,7 @@ pub async fn agent_start(
     };
     let mut options = session_options(agent_id, plugin.as_deref(), skills);
     options.env.extend(claude_env(&app, agent_id)?);
+    options.env.extend(launch_env);
     options.auto = wants_auto(&chat_id, auto.unwrap_or(false));
     options.model = picked_model(&state, agent_id);
     options.usage_log = app.path().app_data_dir().ok().map(|dir| crate::acp::UsageLog {
@@ -1378,15 +1377,13 @@ impl crate::acp::AcpSink for QuietSink {
 /// before any chat with that agent has run). None when the agent doesn't report models.
 #[tauri::command]
 pub async fn agent_models(app: AppHandle, state: State<'_, AppState>, agent_id: AgentId) -> CmdResult<Option<AgentModels>> {
-    let mut command = system::acp_command(agent_id).ok_or("This agent has no start command")?;
-    let program = command[0].clone();
-    let found = system::agent_program(&RealExec, agent_id).ok_or_else(|| format!("Can't find {program} on this computer"))?;
-    command[0] = found.to_string_lossy().into_owned();
+    let (command, launch_env) = agent_launch(&app, agent_id).await?;
     let cwd = app.path().app_cache_dir().map_err(err)?.join("model-probe");
     std::fs::create_dir_all(&cwd).map_err(err)?;
     let probe = format!("models-{}", agent_key(agent_id));
     let mut options = session_options(agent_id, None, false);
     options.env.extend(claude_env(&app, agent_id)?);
+    options.env.extend(launch_env);
     state.acp.start_with(&probe, &command, &cwd, Arc::new(QuietSink), options).await.map_err(err)?;
     let models = state.acp.models(&probe).ok().flatten();
     let _ = state.acp.stop(&probe).await;
@@ -1972,6 +1969,211 @@ pub fn write_brief(state: State<'_, AppState>, project_id: String, brief: String
     let folder = project_folder(&state, &project_id)?;
     projects::write_project_brief(&folder, &brief)
         .map_err(|e| format!("Can't write the project brief: {e}"))
+}
+
+// ---- Your API (the `custom` agent: opencode with the user's provider, see api_engine) ----
+
+/// Where the provider's key is kept: the keychain like the sign-in token (a file only when there is
+/// no keychain); dev builds use a 0600 file for the reason given at `auth_manager`.
+pub struct ApiKeys(pub Arc<dyn crate::auth::TokenStore>);
+
+impl ApiKeys {
+    pub fn new(data_dir: &Path) -> Self {
+        let store: Arc<dyn crate::auth::TokenStore> = if cfg!(debug_assertions) {
+            Arc::new(FileStore::new(data_dir.join("api-key-dev.json")))
+        } else {
+            Arc::new(SecureStore::new(KeyringStore, FileStore::new(data_dir.join("api-key.json"))))
+        };
+        Self(store)
+    }
+
+    /// The keychain can block or ask, so it runs off the async threads.
+    async fn get(&self) -> CmdResult<Option<String>> {
+        let store = self.0.clone();
+        tauri::async_runtime::spawn_blocking(move || store.get(crate::api_engine::KEY_ACCOUNT))
+            .await
+            .map_err(err)?
+            .map_err(err)
+    }
+
+    async fn set(&self, key: String) -> CmdResult<()> {
+        let store = self.0.clone();
+        tauri::async_runtime::spawn_blocking(move || store.set(crate::api_engine::KEY_ACCOUNT, &key))
+            .await
+            .map_err(err)?
+            .map_err(err)
+    }
+
+    async fn delete(&self) -> CmdResult<()> {
+        let store = self.0.clone();
+        tauri::async_runtime::spawn_blocking(move || store.delete(crate::api_engine::KEY_ACCOUNT))
+            .await
+            .map_err(err)?
+            .map_err(err)
+    }
+}
+
+/// One engine download at a time.
+#[derive(Default)]
+pub struct EngineInstall(pub tokio::sync::Mutex<()>);
+
+/// The download's progress, `{ done, total }` in bytes.
+pub const ENGINE_PROGRESS_EVENT: &str = "engine://progress";
+
+fn api_client(timeout: std::time::Duration) -> CmdResult<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .user_agent(concat!("tayang-studio/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(err)
+}
+
+/// What Your API has: the provider, whether a key is saved and whether the engine is downloaded.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiStatus {
+    provider: Option<crate::api_engine::ApiProvider>,
+    has_key: bool,
+    engine_installed: bool,
+}
+
+#[tauri::command]
+pub async fn api_status(app: AppHandle, state: State<'_, AppState>, keys: State<'_, ApiKeys>) -> CmdResult<ApiStatus> {
+    let data = app.path().app_data_dir().map_err(err)?;
+    Ok(ApiStatus {
+        provider: state.db.get_settings(&state.home).api_provider,
+        has_key: keys.get().await.ok().flatten().is_some_and(|k| !k.is_empty()),
+        engine_installed: crate::api_engine::installed_engine(&data).is_some(),
+    })
+}
+
+/// Lists the models at `base_url`, which checks the key too. No `key`: the saved one.
+#[tauri::command]
+pub async fn api_check(keys: State<'_, ApiKeys>, base_url: String, key: Option<String>) -> CmdResult<crate::api_engine::ApiCheck> {
+    let base = crate::api_engine::clean_base_url(&base_url).ok_or("Type an address that starts with https:// or http://")?;
+    let key = match key {
+        Some(k) => k,
+        None => keys.get().await?.unwrap_or_default(),
+    };
+    let client = api_client(std::time::Duration::from_secs(20))?;
+    Ok(crate::api_engine::check(&client, &base, &key).await)
+}
+
+/// Whether something answers at `base_url` (a local 9router).
+#[tauri::command]
+pub async fn api_reachable(base_url: String) -> CmdResult<bool> {
+    let Some(base) = crate::api_engine::clean_base_url(&base_url) else { return Ok(false) };
+    let client = api_client(std::time::Duration::from_millis(1500))?;
+    Ok(crate::api_engine::reachable(&client, &base).await)
+}
+
+/// Saves the provider (and the key, when given) and makes Your API the default agent.
+#[tauri::command]
+pub async fn api_save(
+    state: State<'_, AppState>,
+    keys: State<'_, ApiKeys>,
+    usage: State<'_, crate::usage::UsageCache>,
+    provider: crate::api_engine::ApiProvider,
+    key: Option<String>,
+) -> CmdResult<Settings> {
+    let base_url = crate::api_engine::clean_base_url(&provider.base_url).ok_or("Type an address that starts with https:// or http://")?;
+    let model = provider.model.trim().to_string();
+    if model.is_empty() {
+        return Err("Pick a model".into());
+    }
+    if let Some(key) = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()) {
+        keys.set(key).await?;
+    }
+    let provider = crate::api_engine::ApiProvider { provider: provider.provider, base_url, model };
+    *usage.0.lock().map_err(err)? = None;
+    state
+        .db
+        .update_settings(serde_json::json!({ "apiProvider": provider, "defaultAgent": "custom" }))
+        .map_err(err)
+}
+
+/// Forgets the provider and its key. The default agent goes back to Claude Code when it was Your API.
+#[tauri::command]
+pub async fn api_clear(state: State<'_, AppState>, keys: State<'_, ApiKeys>) -> CmdResult<Settings> {
+    keys.delete().await?;
+    let mut patch = serde_json::json!({ "apiProvider": null });
+    if state.db.get_settings(&state.home).default_agent == AgentId::Custom {
+        patch["defaultAgent"] = serde_json::json!("claude");
+    }
+    state.db.update_settings(patch).map_err(err)
+}
+
+/// Downloads the engine unless it is there, sending `engine://progress` while it does.
+#[tauri::command]
+pub async fn engine_install(app: AppHandle, lock: State<'_, EngineInstall>) -> CmdResult<()> {
+    let _one = lock.0.lock().await;
+    let data = app.path().app_data_dir().map_err(err)?;
+    // Large file, slow connections: no overall timeout, only a connect one.
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .user_agent(concat!("tayang-studio/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(err)?;
+    let emitter = app.clone();
+    let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    let progress = std::sync::Mutex::new(move |done: u64, total: Option<u64>| {
+        let end = total.is_some_and(|t| done >= t);
+        if end || last.elapsed() >= std::time::Duration::from_millis(150) {
+            last = std::time::Instant::now();
+            let _ = emitter.emit(ENGINE_PROGRESS_EVENT, serde_json::json!({ "done": done, "total": total }));
+        }
+    });
+    crate::api_engine::install_engine(&client, &data, |d, t| {
+        if let Ok(mut f) = progress.lock() {
+            f(d, t)
+        }
+    })
+    .await?;
+    Ok(())
+}
+
+/// The command and environment that start Your API: the engine with the saved provider and key.
+async fn api_agent(app: &AppHandle) -> CmdResult<(Vec<String>, Vec<(String, String)>)> {
+    let data = app.path().app_data_dir().map_err(err)?;
+    let engine = crate::api_engine::installed_engine(&data).ok_or("Your API isn't set up yet. Open Settings › Agents › Your API")?;
+    let state = app.state::<AppState>();
+    let provider = state.db.get_settings(&state.home).api_provider.ok_or("Your API isn't set up yet. Open Settings › Agents › Your API")?;
+    let key = app.state::<ApiKeys>().get().await?.filter(|k| !k.is_empty()).ok_or("Your API key is missing. Open Settings › Agents › Your API")?;
+    let config_dir = crate::api_engine::engine_config_dir(&data);
+    std::fs::create_dir_all(&config_dir).map_err(err)?;
+    let command = vec![engine.to_string_lossy().into_owned(), "acp".into()];
+    Ok((command, crate::api_engine::session_env(&provider, &key, &config_dir)))
+}
+
+/// The command that starts `agent_id` on this computer, plus any environment of its own.
+async fn agent_launch(app: &AppHandle, agent_id: AgentId) -> CmdResult<(Vec<String>, Vec<(String, String)>)> {
+    if agent_id == AgentId::Custom {
+        return api_agent(app).await;
+    }
+    let mut command = system::acp_command(agent_id).ok_or("Pick an agent first")?;
+    let program = command[0].clone();
+    let found = system::agent_program(&RealExec, agent_id).ok_or_else(|| format!("Can't find {program} on this computer"))?;
+    command[0] = found.to_string_lossy().into_owned();
+    Ok((command, Vec::new()))
+}
+
+/// Your API as a row of the agent list: ready once the engine, the provider and the key are there.
+async fn api_agent_info(app: &AppHandle) -> AgentInfo {
+    let data = app.path().app_data_dir().ok();
+    let engine = data.as_deref().and_then(crate::api_engine::installed_engine).is_some();
+    let provider = app.try_state::<AppState>().and_then(|s| s.db.get_settings(&s.home).api_provider);
+    let key = match app.try_state::<ApiKeys>() {
+        Some(k) => k.get().await.ok().flatten().is_some_and(|k| !k.is_empty()),
+        None => false,
+    };
+    AgentInfo {
+        id: AgentId::Custom,
+        name: "Your API".into(),
+        installed: engine && provider.is_some() && key,
+        version: provider.map(|p| p.model),
+        acp_command: Vec::new(),
+        recommended: false,
+    }
 }
 
 #[cfg(test)]
