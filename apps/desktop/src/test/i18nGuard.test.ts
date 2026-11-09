@@ -30,7 +30,7 @@ const SAY = new Set(['appendSystem', 'fail', 'setError', 'setApiError', 'setUrlE
 const BRANDS = [
   'Tayang', 'Claude Code', 'Claude', 'claude', 'opencode', 'Codex', 'Gemini CLI', 'Gemini', 'HyperFrames', 'Remotion',
   'ElevenLabs', 'FFmpeg', 'yt-dlp', 'Node.js', 'Chrome', 'Oyen', 'TikTok', 'Instagram', 'Reels', 'YouTube', 'ACP', 'MCP',
-  'sk_', 'Shift', 'Esc', 'MP4', 'API', 'Bahasa Indonesia', 'English',
+  'DeepSeek', '9router', 'CommandCode', 'sk_', 'Shift', 'Esc', 'MP4', 'API', 'Bahasa Indonesia', 'English',
 ];
 
 const files = (dir: string): string[] =>

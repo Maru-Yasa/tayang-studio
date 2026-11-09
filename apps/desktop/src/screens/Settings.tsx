@@ -10,6 +10,7 @@ import { GiftCode } from '@/components/GiftCode';
 import { UsageTab } from '@/components/UsageTab';
 import { ClaudeAccountControl } from '@/components/ClaudeAccountControl';
 import { AgentLogo } from '@/components/AgentLogo';
+import { ApiSetupDialog } from '@/components/ApiSetupDialog';
 import { Button } from '@/components/Button';
 import { ToolRow, TOOL_ORDER } from '@/components/ToolRow';
 import { Input } from '@/components/ui/input';
@@ -17,7 +18,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AGENT_NAMES } from '@/lib/agents';
-import { apiUrlOverride, detectAgents, getSettings, getSystemInfo, pickFolder, updateSettings } from '@/lib/ipc';
+import { apiClear, apiUrlOverride, detectAgents, getSettings, getSystemInfo, pickFolder, updateSettings } from '@/lib/ipc';
 
 /** What Rust says when background mode can't make its tray (and turned it back off). */
 const TRAY_UNAVAILABLE = 'tray-unavailable';
@@ -176,6 +177,17 @@ export function Settings() {
   const setSettings = useApp((s) => s.setSettings);
   const navigate = useApp((s) => s.navigate);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [apiOpen, setApiOpen] = useState(false);
+  const reloadAgents = () => void detectAgents().then(setAgents, () => {});
+  const removeApi = async () => {
+    setError(null);
+    try {
+      setSettings(await apiClear());
+      reloadAgents();
+    } catch (e) {
+      setError(t('settings.saveError', { message: e instanceof Error ? e.message : String(e) }));
+    }
+  };
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const statuses = useInstall((s) => s.statuses);
@@ -343,10 +355,29 @@ export function Settings() {
                     <div className="mr-auto flex min-w-0 flex-col gap-1">
                       <span className="text-sm font-medium">{AGENT_NAMES[a.id]}</span>
                       <span className="text-xs text-text-3">
-                        {a.installed ? (a.version ? t('settings.connectedVersion', { version: a.version }) : t('settings.connected')) : t('settings.notInstalled')}
+                        {a.id === 'custom'
+                          ? a.installed && a.version
+                            ? t('onboarding.connect.yourApiReady', { model: a.version })
+                            : t('onboarding.connect.yourApiHint')
+                          : a.installed
+                            ? a.version
+                              ? t('settings.connectedVersion', { version: a.version })
+                              : t('settings.connected')
+                            : t('settings.notInstalled')}
                       </span>
                     </div>
-                    {a.id === 'claude' && a.installed ? (
+                    {a.id === 'custom' ? (
+                      <div className="flex items-center gap-1">
+                        {a.installed && (
+                          <Button variant="ghost" className="h-8 px-2 text-[13px] text-text-2" onClick={() => void removeApi()}>
+                            {t('settings.apiRemove')}
+                          </Button>
+                        )}
+                        <Button variant="ghost" className="h-8 px-2 text-[13px] text-primary hover:text-accent-hover" onClick={() => setApiOpen(true)}>
+                          {a.installed ? t('settings.apiChange') : t('onboarding.connect.setUp')}
+                        </Button>
+                      </div>
+                    ) : a.id === 'claude' && a.installed ? (
                       <ClaudeAccountControl showSignOut />
                     ) : (
                       <Button variant="ghost" className="h-8 px-2 text-[13px] text-primary hover:text-accent-hover" onClick={() => navigate({ name: 'connect' })}>
@@ -357,6 +388,14 @@ export function Settings() {
                 ))}
               </RadioGroup>
             </Card>
+            <ApiSetupDialog
+              open={apiOpen}
+              onOpenChange={setApiOpen}
+              onSaved={(next) => {
+                setSettings(next);
+                reloadAgents();
+              }}
+            />
             <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
               <div className="mr-auto flex flex-col gap-1">
                 <label htmlFor="frame-check" className="text-sm font-medium">

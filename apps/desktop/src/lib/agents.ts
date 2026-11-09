@@ -6,9 +6,9 @@ export const AGENT_NAMES: Record<AgentId, string> = {
   opencode: 'opencode',
   gemini: 'Gemini CLI',
   codex: 'Codex',
-  /** The only name that is a phrase, not a brand: it follows the language. */
+  /** Your API (the user's own provider key): the only name that is a phrase, so it follows the language. */
   get custom() {
-    return i18n.t('agents.yourAgent');
+    return i18n.t('agents.yourApi');
   },
 };
 
@@ -30,12 +30,12 @@ export function agentErrorText(message: string | null | undefined, agent: AgentI
   const msg = (message ?? '').trim();
   if (AUTH.test(msg)) {
     const opts = lng ? { lng } : {};
+    // Your API has no sign-in: its key was refused.
+    if (agent === 'custom') return i18n.t('errors.apiKeyRefused', { ...opts, detail: msg });
     // Claude signs in from Tayang (Settings › Agents), not a terminal.
     if (agent === 'claude') return i18n.t('errors.signInClaude', opts);
-    const cmd = SIGN_IN_COMMAND[agent] || i18n.t('errors.yourAgentCommand', opts);
-    const run = agent === 'custom' ? cmd : `\`${cmd}\``;
-    const name = agent === 'custom' ? i18n.t('agents.yourAgent', opts) : AGENT_NAMES[agent];
-    return i18n.t('errors.signIn', { agent: name, command: run, ...opts });
+    const cmd = SIGN_IN_COMMAND[agent];
+    return i18n.t('errors.signIn', { agent: AGENT_NAMES[agent], command: `\`${cmd}\``, ...opts });
   }
   return msg || i18n.t('errors.agentStopped', lng ? { lng } : {});
 }

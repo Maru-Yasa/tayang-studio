@@ -26,4 +26,10 @@ describe('agentErrorText', () => {
       'Sign in to Gemini CLI: open a terminal and run `gemini` once, then try again',
     );
   });
+
+  it('says Your API key was refused instead of asking to sign in', () => {
+    expect(agentErrorText('Internal error: Authentication Fails, Your api key: ****test is invalid', 'custom')).toBe(
+      'Your API key was refused. Check it in Settings › Agents › Your API. The provider said: Internal error: Authentication Fails, Your api key: ****test is invalid',
+    );
+  });
 });

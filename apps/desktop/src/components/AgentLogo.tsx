@@ -1,4 +1,5 @@
 import type { AgentId, ToolId } from '@tayang/shared';
+import { KeyRound } from 'lucide-react';
 import claude from '@/assets/brand/claude.svg';
 import gemini from '@/assets/brand/googlegemini.svg';
 import openai from '@/assets/brand/openai.svg';
@@ -21,6 +22,8 @@ const SRC: Partial<Record<AgentId | ToolId, string>> = {
 
 export function AgentLogo({ id, size = 24 }: { id: AgentId | ToolId; size?: number }) {
   const src = SRC[id];
+  // Your API has no brand of its own: a key.
+  if (id === 'custom') return <KeyRound aria-hidden="true" size={size * 0.8} strokeWidth={1.5} className="text-text-2" />;
   if (!src) {
     return (
       <span

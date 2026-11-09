@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Plus } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import type { AgentId, AgentInfo } from '@tayang/shared';
 import defaultOyen from '@/assets/brand/oyen-expr-default.svg';
 import { AgentLogo } from '@/components/AgentLogo';
+import { ApiSetupDialog } from '@/components/ApiSetupDialog';
 import { ClaudeAccountControl } from '@/components/ClaudeAccountControl';
 import { Button } from '@/components/Button';
 import { Oyen } from '@/components/Oyen';
@@ -26,6 +27,7 @@ export function Connect() {
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentInfo[] | null>(null);
+  const [apiOpen, setApiOpen] = useState(false);
   const claudeSignedIn = useClaudeAccount((s) => !!s.account?.signedIn);
 
   useEffect(() => {
@@ -66,19 +68,21 @@ export function Connect() {
         <ul className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
           {ROWS.map((r) => {
             const a = info(r.id);
-            const name = r.name ?? t('onboarding.connect.otherAgent');
+            const name = r.name ?? t('agents.yourApi');
             const installed = !!a?.installed;
             const connected = ready(r.id) && settings?.defaultAgent === r.id;
             const needsSignIn = installed && r.id === 'claude' && !claudeSignedIn;
             const status = r.id === 'custom'
-              ? t('onboarding.connect.otherHint')
+              ? installed && a?.version
+                ? t('onboarding.connect.yourApiReady', { model: a.version })
+                : t('onboarding.connect.yourApiHint')
               : installed
                 ? t(connected ? 'onboarding.connect.foundReady' : 'onboarding.connect.found')
                 : t('onboarding.connect.notInstalled');
             return (
               <li key={r.id} className="flex items-center gap-4 border-b border-border p-4 last:border-b-0">
                 <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-raised text-text-2">
-                  {r.id === 'custom' ? <Plus size={18} strokeWidth={1.5} aria-hidden="true" /> : <AgentLogo id={r.id} size={22} />}
+                  <AgentLogo id={r.id} size={22} />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -94,25 +98,39 @@ export function Connect() {
                   </span>
                 )}
                 {needsSignIn && <ClaudeAccountControl onSignedIn={() => void connect('claude')} />}
-                {installed && !connected && !needsSignIn && (
+                {r.id === 'custom' && (
+                  <Button variant="secondary" className="h-9" onClick={() => setApiOpen(true)}>
+                    {installed ? t('settings.apiChange') : t('onboarding.connect.setUp')}
+                  </Button>
+                )}
+                {r.id !== 'custom' && installed && !connected && !needsSignIn && (
                   <Button variant="secondary" className="h-9" onClick={() => connect(r.id)} aria-label={t('onboarding.connect.connectAria', { name })}>
                     {t('onboarding.connect.connect')}
                   </Button>
                 )}
-                {!installed && (
+                {r.id !== 'custom' && !installed && (
                   <a
                     href={r.installUrl ?? '#'}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex h-9 items-center px-1 text-sm font-medium text-primary hover:text-accent-hover"
                   >
-                    {r.id === 'custom' ? t('onboarding.connect.addManually') : t('onboarding.connect.howToInstall')}
+                    {t('onboarding.connect.howToInstall')}
                   </a>
                 )}
               </li>
             );
           })}
         </ul>
+
+        <ApiSetupDialog
+          open={apiOpen}
+          onOpenChange={setApiOpen}
+          onSaved={(next) => {
+            setSettings(next);
+            detectAgents().then(setAgents).catch(() => {});
+          }}
+        />
 
         {error && <p role="alert" className="m-0 text-[13px] text-orange-light">{error}</p>}
 

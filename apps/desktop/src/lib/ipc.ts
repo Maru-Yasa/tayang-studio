@@ -1,6 +1,8 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import type {
   AgentId,
+  ApiCheck,
+  ApiProvider,
   AgentInfo,
   AgentUsage,
   ChatTrace,
@@ -29,6 +31,27 @@ import type {
 } from '@tayang/shared';
 
 // ---- system and settings ----
+
+// Your API: the user's own provider key, run on the opencode engine Tayang downloads (api_engine.rs).
+export interface ApiStatus {
+  provider: ApiProvider | null;
+  hasKey: boolean;
+  engineInstalled: boolean;
+}
+export const apiStatus = () => invoke<ApiStatus>('api_status');
+/** Lists the models at `baseUrl`, which checks the key too; no `key` checks the saved one. */
+export const apiCheck = (baseUrl: string, key: string | null) => invoke<ApiCheck>('api_check', { baseUrl, key });
+export const apiReachable = (baseUrl: string) => invoke<boolean>('api_reachable', { baseUrl });
+/** Saves the provider (and the key, when given) and makes Your API the default agent. */
+export const apiSave = (provider: ApiProvider, key: string | null) => invoke<Settings>('api_save', { provider, key });
+export const apiClear = () => invoke<Settings>('api_clear');
+/** Downloads the engine unless it's there; progress comes as `ENGINE_PROGRESS_EVENT`. */
+export const engineInstall = () => invoke<void>('engine_install');
+export const ENGINE_PROGRESS_EVENT = 'engine://progress';
+export interface EngineProgress {
+  done: number;
+  total: number | null;
+}
 export const getSystemInfo = () => invoke<SystemInfo>('get_system_info');
 export const detectAgents = () => invoke<AgentInfo[]>('detect_agents');
 export const checkTools = (agent: AgentId) => invoke<ToolStatus[]>('check_tools', { agent });
