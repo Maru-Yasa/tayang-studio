@@ -4781,7 +4781,7 @@ dependencies = [
 
 [[package]]
 name = "tayang-studio"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "base64 0.22.1",
  "chrono",
