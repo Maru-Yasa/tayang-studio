@@ -1296,8 +1296,7 @@ pub async fn agent_start(
     let mut command = system::acp_command(agent_id)
         .ok_or("Pick an agent first: custom agents have no start command yet")?;
     let program = command[0].clone();
-    let found = system::Exec::which(&RealExec, &program)
-        .ok_or_else(|| format!("Can't find {program} on this computer"))?;
+    let found = system::agent_program(&RealExec, agent_id).ok_or_else(|| format!("Can't find {program} on this computer"))?;
     command[0] = found.to_string_lossy().into_owned();
     let folder = project_folder_for_chat(&state, &chat_id)?;
     let cwd = resolve_cwd(&state.working(), &chat_id, folder.as_deref())?;
@@ -1381,7 +1380,7 @@ impl crate::acp::AcpSink for QuietSink {
 pub async fn agent_models(app: AppHandle, state: State<'_, AppState>, agent_id: AgentId) -> CmdResult<Option<AgentModels>> {
     let mut command = system::acp_command(agent_id).ok_or("This agent has no start command")?;
     let program = command[0].clone();
-    let found = system::Exec::which(&RealExec, &program).ok_or_else(|| format!("Can't find {program} on this computer"))?;
+    let found = system::agent_program(&RealExec, agent_id).ok_or_else(|| format!("Can't find {program} on this computer"))?;
     command[0] = found.to_string_lossy().into_owned();
     let cwd = app.path().app_cache_dir().map_err(err)?.join("model-probe");
     std::fs::create_dir_all(&cwd).map_err(err)?;

@@ -381,16 +381,83 @@ pub fn acp_command(id: AgentId) -> Option<Vec<String>> {
         .map(|d| d.3.iter().map(|s| s.to_string()).collect())
 }
 
+/// The file name of the CLI that OpenCode Desktop bundles.
+fn opencode_cli_name() -> &'static str {
+    if cfg!(windows) {
+        "opencode-cli.exe"
+    } else {
+        "opencode-cli"
+    }
+}
+
+/// The CLI next to an OpenCode Desktop executable: `resources/` in the Electron app, the same
+/// folder in the older Tauri one.
+fn bundled_opencode_cli(app_dir: &Path) -> Option<PathBuf> {
+    [app_dir.join("resources"), app_dir.to_path_buf()]
+        .into_iter()
+        .map(|d| d.join(opencode_cli_name()))
+        .find(|p| p.is_file())
+}
+
+/// Where OpenCode Desktop installs: its CLI is used when there's no `opencode` CLI of its own.
+pub fn opencode_desktop_dirs(home: Option<&Path>, local_appdata: Option<&Path>, program_files: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if cfg!(windows) {
+        if let Some(l) = local_appdata {
+            for name in ["ai.opencode.desktop", "ai.opencode.desktop.beta", "@opencodedesktop", "OpenCode"] {
+                dirs.push(l.join("Programs").join(name));
+            }
+            dirs.push(l.join("OpenCode"));
+        }
+        dirs.extend(program_files.map(|p| p.join("OpenCode")));
+    } else if cfg!(target_os = "macos") {
+        let app = Path::new("OpenCode.app").join("Contents");
+        dirs.push(Path::new("/Applications").join(&app).join("Resources"));
+        dirs.push(Path::new("/Applications").join(&app).join("MacOS"));
+        if let Some(h) = home {
+            dirs.push(h.join("Applications").join(&app).join("Resources"));
+            dirs.push(h.join("Applications").join(&app).join("MacOS"));
+        }
+    }
+    dirs
+}
+
+/// The OpenCode to run: what `which` found, unless that's OpenCode Desktop's app (on Windows
+/// `opencode` also matches `OpenCode.exe`), which can't speak ACP, then the CLI it bundles. With
+/// no `opencode` at all, OpenCode Desktop's CLI.
+pub fn opencode_program(found: Option<PathBuf>, desktop_dirs: &[PathBuf]) -> Option<PathBuf> {
+    if let Some(found) = found {
+        let is_cli = found.file_stem().is_some_and(|s| s.eq_ignore_ascii_case("opencode-cli"));
+        let bundled = if is_cli { None } else { found.parent().and_then(bundled_opencode_cli) };
+        return Some(bundled.unwrap_or(found));
+    }
+    desktop_dirs.iter().find_map(|d| bundled_opencode_cli(d))
+}
+
+/// The program that starts this agent's ACP command (`acp_command(id)[0]`), found on this computer.
+pub fn agent_program(exec: &dyn Exec, id: AgentId) -> Option<PathBuf> {
+    let program = acp_command(id)?.into_iter().next()?;
+    let found = exec.which(&program);
+    if id != AgentId::Opencode {
+        return found;
+    }
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    opencode_program(found, &opencode_desktop_dirs(home_dir().as_deref(), env("LOCALAPPDATA").as_deref(), env("ProgramFiles").as_deref()))
+}
+
 pub fn detect_agents(exec: &dyn Exec) -> Vec<AgentInfo> {
     let defs = AGENT_DEFS;
     defs.iter()
         .map(|(id, name, bin, acp)| {
-            let installed = exec.which(bin).is_some();
-            let version = if installed {
-                exec.run(bin, &["--version"]).and_then(|s| parse_version(&s))
-            } else {
-                None
-            };
+            // OpenCode Desktop counts: its bundled CLI is what runs.
+            let program = if *id == AgentId::Opencode { agent_program(exec, *id) } else { exec.which(bin) };
+            let installed = program.is_some();
+            let version = match &program {
+                Some(p) if *id == AgentId::Opencode => exec.run(&p.to_string_lossy(), &["--version"]),
+                Some(_) => exec.run(bin, &["--version"]),
+                None => None,
+            }
+            .and_then(|s| parse_version(&s));
             AgentInfo {
                 id: *id,
                 name: name.to_string(),
@@ -649,7 +716,8 @@ mod tests {
     }
     impl Exec for FakeExec {
         fn run(&self, program: &str, _args: &[&str]) -> Option<String> {
-            self.out.get(program).cloned()
+            let name = Path::new(program).file_name().map(|n| n.to_string_lossy().into_owned());
+            self.out.get(program).or_else(|| self.out.get(name.as_deref()?)).cloned()
         }
         fn which(&self, program: &str) -> Option<PathBuf> {
             self.out.get(program).map(|_| PathBuf::from(format!("/bin/{program}")))
@@ -720,6 +788,33 @@ mod tests {
         let e = tool(&t, ToolId::ElevenlabsMcp);
         assert!(!e.found);
         assert_eq!(e.detail, "Check your agent's MCP settings");
+    }
+
+    #[test]
+    fn opencode_desktop_runs_the_cli_it_bundles() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cli = opencode_cli_name();
+        // The Electron app: OpenCode.exe, resources/opencode-cli.exe.
+        let electron = tmp.path().join("ai.opencode.desktop");
+        std::fs::create_dir_all(electron.join("resources")).unwrap();
+        std::fs::write(electron.join("OpenCode.exe"), "").unwrap();
+        std::fs::write(electron.join("resources").join(cli), "").unwrap();
+        // The older Tauri app: opencode-cli.exe next to OpenCode.exe.
+        let tauri = tmp.path().join("OpenCode");
+        std::fs::create_dir_all(&tauri).unwrap();
+        std::fs::write(tauri.join("OpenCode.exe"), "").unwrap();
+        std::fs::write(tauri.join(cli), "").unwrap();
+        let npm = tmp.path().join("npm").join("opencode.cmd");
+
+        // `which` found the desktop app, not a CLI: run the CLI it bundles.
+        assert_eq!(opencode_program(Some(electron.join("OpenCode.exe")), &[]), Some(electron.join("resources").join(cli)));
+        assert_eq!(opencode_program(Some(tauri.join("OpenCode.exe")), &[]), Some(tauri.join(cli)));
+        // A real CLI stays.
+        assert_eq!(opencode_program(Some(npm.clone()), std::slice::from_ref(&electron)), Some(npm));
+        // No CLI on PATH: the desktop app's.
+        let missing = tmp.path().join("nothing");
+        assert_eq!(opencode_program(None, &[missing.clone(), tauri.clone()]), Some(tauri.join(cli)));
+        assert_eq!(opencode_program(None, &[missing]), None);
     }
 
     #[test]
