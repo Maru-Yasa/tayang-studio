@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowLeft, ChevronRight, KeyRound } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Globe, KeyRound } from 'lucide-react';
+import commandcodeLogo from '@/assets/brand/commandcode.svg';
+import deepseekLogo from '@/assets/brand/deepseek.svg';
+import ninerouterLogo from '@/assets/brand/9router.svg';
 import type { ApiCheck, ApiProviderId, Settings } from '@tayang/shared';
 import { Button } from '@/components/Button';
 import { Oyen } from '@/components/Oyen';
@@ -20,15 +23,28 @@ import {
 import { track } from '@/lib/analytics';
 
 /** The providers offered by name; `other` takes any OpenAI-compatible address. */
-export const API_PRESETS: { id: ApiProviderId; name?: string; baseUrl: string; keyUrl?: string; model?: string }[] = [
-  { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', keyUrl: 'https://platform.deepseek.com/api_keys', model: 'deepseek-chat' },
-  { id: '9router', name: '9router', baseUrl: 'http://localhost:20128/v1', keyUrl: 'http://localhost:20128/dashboard' },
-  { id: 'commandcode', name: 'CommandCode', baseUrl: 'https://api.commandcode.ai/provider/v1', keyUrl: 'https://commandcode.ai/provider' },
+const API_PRESETS: { id: ApiProviderId; name?: string; logo?: string; baseUrl: string; keyUrl?: string; model?: string }[] = [
+  { id: 'deepseek', name: 'DeepSeek', logo: deepseekLogo, baseUrl: 'https://api.deepseek.com', keyUrl: 'https://platform.deepseek.com/api_keys', model: 'deepseek-chat' },
+  { id: '9router', name: '9router', logo: ninerouterLogo, baseUrl: 'http://localhost:20128/v1', keyUrl: 'http://localhost:20128/dashboard' },
+  { id: 'commandcode', name: 'CommandCode', logo: commandcodeLogo, baseUrl: 'https://api.commandcode.ai/provider/v1', keyUrl: 'https://commandcode.ai/provider' },
   { id: 'other', baseUrl: '' },
 ];
 
 const OTHER = { id: 'other' as const, baseUrl: '' } satisfies (typeof API_PRESETS)[number];
 const preset = (id: ApiProviderId): (typeof API_PRESETS)[number] => API_PRESETS.find((p) => p.id === id) ?? OTHER;
+/** The provider's logo; Other gets a globe. */
+function ProviderLogo({ id, size = 22 }: { id: ApiProviderId; size?: number }) {
+  const logo = API_PRESETS.find((p) => p.id === id)?.logo;
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-md bg-raised text-text-2"
+      style={{ width: size + 14, height: size + 14 }}
+    >
+      {logo ? <img src={logo} alt="" aria-hidden="true" width={size} height={size} style={{ width: size, height: size }} /> : <Globe size={size - 4} strokeWidth={1.5} aria-hidden="true" />}
+    </span>
+  );
+}
+
 const mb = (bytes: number) => (bytes / 1_000_000).toFixed(0);
 
 /**
@@ -197,6 +213,7 @@ export function ApiSetupDialog({
                     onClick={() => pick(o.id)}
                     className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-raised focus-visible:bg-raised focus-visible:outline-none"
                   >
+                    <ProviderLogo id={o.id} />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="text-[14px] font-medium">{providerName(o.id)}</span>
                       <span className="text-xs text-text-3">
@@ -226,7 +243,9 @@ export function ApiSetupDialog({
               className="inline-flex w-fit items-center gap-1 text-[13px] text-text-2 hover:text-foreground"
             >
               <ArrowLeft size={14} aria-hidden="true" />
-              {t('apiSetup.back')} · {providerName(provider)}
+              {t('apiSetup.back')} ·
+              <ProviderLogo id={provider} size={14} />
+              {providerName(provider)}
             </button>
 
             {(provider === 'other' || provider === '9router') && (
