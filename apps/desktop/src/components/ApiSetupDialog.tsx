@@ -24,6 +24,7 @@ import {
   type EngineProgress,
 } from '@/lib/ipc';
 import { track } from '@/lib/analytics';
+import { useModels } from '@/state/models';
 
 /** The providers offered by name; `other` takes any OpenAI-compatible address. */
 const API_PRESETS: { id: ApiProviderId; name?: string; logo?: string; baseUrl: string; keyUrl?: string; model?: string }[] = [
@@ -232,6 +233,8 @@ export function ApiSetupDialog({
       try {
         const settings = await apiSave({ provider, baseUrl, model, models: check?.models ?? [model] }, keyArg);
         track('agent connected', { agent: 'custom', provider });
+        // The chat's model menu keeps each agent's last list: read the new provider's models now.
+        void useModels.getState().load('custom', true);
         onSaved(settings);
         onOpenChange(false);
       } catch (e) {

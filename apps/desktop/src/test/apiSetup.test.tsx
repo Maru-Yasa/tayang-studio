@@ -13,6 +13,8 @@ vi.mock('@/lib/ipc', () => ({
   engineInstall: vi.fn(),
 }));
 vi.mock('@/lib/analytics', () => ({ track: vi.fn() }));
+const load = vi.fn().mockResolvedValue(undefined);
+vi.mock('@/state/models', () => ({ useModels: { getState: () => ({ load }) } }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 import * as ipc from '@/lib/ipc';
@@ -50,6 +52,7 @@ describe('ApiSetupDialog', () => {
     expect(ipc.engineInstall).toHaveBeenCalled();
     expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', models: ['deepseek-chat', 'deepseek-reasoner'] }, 'sk-123');
     expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(load).toHaveBeenCalledWith('custom', true);
   });
 
   it('says in plain words why a key failed', async () => {
