@@ -1150,6 +1150,7 @@ export const id: Translations = {
     title: 'Pakai API sendiri',
     description: 'Tempel key dari penyedia AI-mu. Tayang yang menjalankan semuanya: nggak perlu install, nggak perlu terminal.',
     providerStep: 'Key-nya dari mana?',
+    lastUsed: 'Terakhir dipakai · {{model}}',
     providers: {
       deepseek: { hint: 'Murah dan jago coding' },
       '9router': { hint: 'Jalan di komputermu dan meneruskan ke banyak penyedia' },
@@ -1165,6 +1166,9 @@ export const id: Translations = {
     check: 'Cek key',
     checking: 'Mengecek…',
     model: 'Model',
+    modelPick: 'Pilih model',
+    modelSearch: 'Cari model…',
+    modelNone: 'Nggak ada model yang cocok',
     recommended: '{{model}} (disarankan)',
     connected: 'Tersambung. Ada {{count}} model',
     failures: {

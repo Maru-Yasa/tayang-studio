@@ -42,7 +42,7 @@ describe('ApiSetupDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Check key' }));
     expect(ipc.apiCheck).toHaveBeenCalledWith('https://api.deepseek.com', 'sk-123');
     expect(await screen.findByText('Connected. 2 models available')).toBeTruthy();
-    expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('deepseek-chat');
+    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('deepseek-chat (recommended)');
 
     await user.click(screen.getByRole('button', { name: 'Save and connect' }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved));
@@ -84,12 +84,20 @@ describe('ApiSetupDialog', () => {
     render(<ApiSetupDialog open onOpenChange={() => {}} onSaved={() => {}} />);
     const user = userEvent.setup();
     await waitFor(() => expect(ipc.apiStatus).toHaveBeenCalled());
+    expect(await screen.findByText('Last used · deepseek-reasoner')).toBeTruthy();
+    expect(screen.getAllByText(/^Last used/)).toHaveLength(1);
     await user.click(await screen.findByRole('button', { name: /DeepSeek/ }));
     expect(await screen.findByText(/A key is saved/)).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Check key' }));
     expect(ipc.apiCheck).toHaveBeenCalledWith('https://api.deepseek.com', null);
     await screen.findByText('Connected. 2 models available');
-    expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('deepseek-reasoner');
+    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('deepseek-reasoner');
+    await user.click(screen.getByRole('combobox', { name: 'Model' }));
+    await user.type(screen.getByPlaceholderText('Search models…'), 'chat');
+    expect(screen.queryByRole('option', { name: 'deepseek-reasoner' })).toBeNull();
+    await user.click(screen.getByRole('option', { name: 'deepseek-chat (recommended)' }));
+    await user.click(screen.getByRole('combobox', { name: 'Model' }));
+    await user.click(screen.getByRole('option', { name: 'deepseek-reasoner' }));
     await user.click(screen.getByRole('button', { name: 'Save and connect' }));
     await waitFor(() => expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner' }, null));
   });

@@ -1156,6 +1156,7 @@ export const en = {
     title: 'Use your own API',
     description: 'Paste a key from your AI provider. Tayang runs everything for you: nothing to install, no terminal.',
     providerStep: 'Who gives you the key?',
+    lastUsed: 'Last used · {{model}}',
     providers: {
       deepseek: { hint: 'Cheap and good at code' },
       '9router': { hint: 'Runs on your computer and routes to many providers' },
@@ -1171,6 +1172,9 @@ export const en = {
     check: 'Check key',
     checking: 'Checking…',
     model: 'Model',
+    modelPick: 'Pick a model',
+    modelSearch: 'Search models…',
+    modelNone: 'No model matches',
     recommended: '{{model}} (recommended)',
     connected: 'Connected. {{count}} models available',
     failures: {
