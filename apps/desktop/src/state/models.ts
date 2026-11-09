@@ -6,10 +6,17 @@ import { useChat } from '@/state/chat';
 
 const CACHE_KEY = 'tayang.agentModels';
 
+/** Your API's models follow the provider saved in Settings, so they are read fresh, never kept. */
+const UNCACHED: AgentId[] = ['custom'];
+const withoutUncached = (byAgent: Partial<Record<AgentId, AgentModels>>) =>
+  Object.fromEntries(Object.entries(byAgent).filter(([agent]) => !UNCACHED.includes(agent as AgentId))) as Partial<
+    Record<AgentId, AgentModels>
+  >;
+
 function loadCache(): Partial<Record<AgentId, AgentModels>> {
   try {
     const raw = JSON.parse(localStorage.getItem(CACHE_KEY) ?? 'null') as unknown;
-    return raw && typeof raw === 'object' ? (raw as Partial<Record<AgentId, AgentModels>>) : {};
+    return raw && typeof raw === 'object' ? withoutUncached(raw as Partial<Record<AgentId, AgentModels>>) : {};
   } catch {
     return {};
   }
@@ -17,7 +24,7 @@ function loadCache(): Partial<Record<AgentId, AgentModels>> {
 
 function saveCache(byAgent: Partial<Record<AgentId, AgentModels>>) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(byAgent));
+    localStorage.setItem(CACHE_KEY, JSON.stringify(withoutUncached(byAgent)));
   } catch {
     /* storage off: the list is read again next time */
   }

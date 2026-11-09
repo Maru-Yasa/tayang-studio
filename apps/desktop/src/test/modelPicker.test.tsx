@@ -58,6 +58,21 @@ describe('ModelPicker', () => {
     expect(ipc.agentModels).toHaveBeenCalledTimes(1);
   });
 
+  it("never keeps Your API's models between launches: they follow the saved provider", async () => {
+    localStorage.setItem(
+      'tayang.agentModels',
+      JSON.stringify({ custom: { current: null, options: [{ value: 'opencode/big-pickle', name: 'Big Pickle' }] }, opencode: { current: null, options: OPTIONS } }),
+    );
+    vi.resetModules();
+    const { useModels: fresh } = await import('@/state/models');
+    expect(fresh.getState().byAgent.custom).toBeUndefined();
+    expect(fresh.getState().byAgent.opencode?.options).toHaveLength(3);
+    vi.mocked(ipc.agentModels).mockResolvedValue({ current: 'tayang/m', options: [{ value: 'tayang/m', name: 'Your API/m' }] });
+    await fresh.getState().load('custom');
+    expect(fresh.getState().byAgent.custom?.options).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem('tayang.agentModels')!).custom).toBeUndefined();
+  });
+
   it('filters by name, so the free ones are easy to find', async () => {
     useModels.setState({ byAgent: { opencode: { current: null, options: OPTIONS } } });
     picker();
