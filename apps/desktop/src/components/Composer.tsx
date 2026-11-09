@@ -70,7 +70,7 @@ function FileChip({ part, onRemove }: { part: FilePart; onRemove(): void }) {
   );
 }
 
-const AGENT_ORDER: AgentId[] = ['claude', 'opencode', 'codex', 'gemini'];
+const AGENT_ORDER: AgentId[] = ['claude', 'opencode', 'codex', 'gemini', 'antigravity'];
 
 /** Every toolbar control: a 32×32 icon button, same radius and hover. */
 const ICON_BUTTON =

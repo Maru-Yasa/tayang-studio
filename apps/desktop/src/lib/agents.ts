@@ -6,6 +6,7 @@ export const AGENT_NAMES: Record<AgentId, string> = {
   opencode: 'opencode',
   gemini: 'Gemini CLI',
   codex: 'Codex',
+  antigravity: 'Antigravity CLI',
   /** Your API (the user's own provider key): the only name that is a phrase, so it follows the language. */
   get custom() {
     return i18n.t('agents.yourApi');
@@ -18,6 +19,7 @@ const SIGN_IN_COMMAND: Record<AgentId, string> = {
   opencode: 'opencode auth login',
   gemini: 'gemini',
   codex: 'codex',
+  antigravity: 'agy acp --login',
   custom: '',
 };
 

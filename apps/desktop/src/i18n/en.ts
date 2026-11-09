@@ -62,7 +62,7 @@ export const en = {
       noPromptsTitle: 'No prompts to learn',
       noPromptsText: 'Choose from suggestions and Tayang writes the expert prompts',
       ownAgentTitle: 'Bring your own agent',
-      ownAgentText: 'Claude Code, opencode, Gemini CLI or any agent that speaks ACP',
+      ownAgentText: 'Claude Code, opencode, Gemini CLI, Antigravity CLI or any agent that speaks ACP',
       checkedTitle: 'Checked before you watch',
       checkedText: 'Every frame is rendered and reviewed for overlaps, cut-off text and timing',
       getStarted: 'Get started',

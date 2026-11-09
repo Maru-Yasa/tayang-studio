@@ -19,6 +19,7 @@ const ROWS: { id: AgentId; name?: string; installUrl?: string }[] = [
   { id: 'opencode', name: 'opencode', installUrl: 'https://opencode.ai' },
   { id: 'gemini', name: 'Gemini CLI', installUrl: 'https://github.com/google-gemini/gemini-cli' },
   { id: 'codex', name: 'Codex', installUrl: 'https://github.com/openai/codex' },
+  { id: 'antigravity', name: 'Antigravity CLI', installUrl: 'https://antigravity.google/docs/getting-started?tab=cli' },
   { id: 'custom' },
 ];
 

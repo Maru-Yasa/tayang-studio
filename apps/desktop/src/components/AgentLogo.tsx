@@ -1,5 +1,6 @@
 import type { AgentId, ToolId } from '@tayang/shared';
 import { KeyRound } from 'lucide-react';
+import antigravity from '@/assets/brand/antigravity.svg';
 import claude from '@/assets/brand/claude.svg';
 import gemini from '@/assets/brand/googlegemini.svg';
 import openai from '@/assets/brand/openai.svg';
@@ -13,6 +14,7 @@ const SRC: Partial<Record<AgentId | ToolId, string>> = {
   claude,
   gemini,
   codex: openai,
+  antigravity,
   opencode,
   node,
   ffmpeg,

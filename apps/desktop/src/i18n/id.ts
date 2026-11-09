@@ -64,7 +64,7 @@ export const id: Translations = {
       noPromptsTitle: 'Tak perlu belajar prompt',
       noPromptsText: 'Pilih dari saran yang ada, Tayang yang menulis prompt-nya',
       ownAgentTitle: 'Pakai agenmu sendiri',
-      ownAgentText: 'Claude Code, opencode, Gemini CLI, atau agen apa pun yang mendukung ACP',
+      ownAgentText: 'Claude Code, opencode, Gemini CLI, Antigravity CLI, atau agen apa pun yang mendukung ACP',
       checkedTitle: 'Dicek sebelum kamu tonton',
       checkedText: 'Setiap frame dirender lalu dicek: ada yang bertumpuk, teks terpotong, atau timing meleset',
       getStarted: 'Mulai',

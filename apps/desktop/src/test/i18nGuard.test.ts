@@ -28,7 +28,7 @@ const TEXT_KEYS = new Set(['label', 'title', 'text', 'hint', 'description', 'mes
 const SAY = new Set(['appendSystem', 'fail', 'setError', 'setApiError', 'setUrlError', 'setSetupLine', 'say']);
 /** Names that stay as they are in every language. */
 const BRANDS = [
-  'Tayang', 'Claude Code', 'Claude', 'claude', 'opencode', 'Codex', 'Gemini CLI', 'Gemini', 'HyperFrames', 'Remotion',
+  'Tayang', 'Claude Code', 'Claude', 'claude', 'opencode', 'Codex', 'Gemini CLI', 'Gemini', 'Antigravity CLI', 'Antigravity', 'HyperFrames', 'Remotion',
   'ElevenLabs', 'FFmpeg', 'yt-dlp', 'Node.js', 'Chrome', 'Oyen', 'TikTok', 'Instagram', 'Reels', 'YouTube', 'ACP', 'MCP',
   'DeepSeek', '9router', 'CommandCode', 'sk_', 'Shift', 'Esc', 'MP4', 'API', 'Bahasa Indonesia', 'English',
 ];
