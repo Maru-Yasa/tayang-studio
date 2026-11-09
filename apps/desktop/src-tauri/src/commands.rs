@@ -2158,6 +2158,12 @@ async fn api_agent(app: &AppHandle) -> CmdResult<(Vec<String>, Vec<(String, Stri
     let state = app.state::<AppState>();
     let provider = state.db.get_settings(&state.home).api_provider.ok_or("Your API isn't set up yet. Open Settings › Agents › Your API")?;
     let key = app.state::<ApiKeys>().get().await?.filter(|k| !k.is_empty()).ok_or("Your API key is missing. Open Settings › Agents › Your API")?;
+    // The provider's list today (models come and go); the saved one when it can't be read.
+    let mut provider = provider;
+    let fresh = crate::api_engine::check(&api_client(std::time::Duration::from_secs(8))?, &provider.base_url, &key).await;
+    if fresh.ok {
+        provider.models = fresh.models;
+    }
     let config_dir = crate::api_engine::engine_config_dir(&data);
     std::fs::create_dir_all(&config_dir).map_err(err)?;
     let command = vec![engine.to_string_lossy().into_owned(), "acp".into()];

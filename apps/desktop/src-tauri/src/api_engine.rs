@@ -68,6 +68,8 @@ pub fn parse_models(body: &Value) -> Option<Vec<String>> {
         .iter()
         .filter(chat)
         .filter_map(|m| m.get("id").and_then(Value::as_str))
+        // Embedding models can't hold a conversation.
+        .filter(|id| !id.to_ascii_lowercase().contains("embed"))
         .map(str::to_string)
         .collect();
     ids.sort();
@@ -409,6 +411,8 @@ mod tests {
             { "id": "claude-sonnet-5", "supported_endpoints": ["/messages"] },
             { "id": "z-ai/glm-5.3-flash", "supported_endpoints": ["/chat/completions"] },
             { "id": "plain" },
+            { "id": "gemini/gemini-embedding-001" },
+            { "id": "text-embedding-3-small" },
         ] });
         assert_eq!(parse_models(&mixed), Some(vec!["plain".into(), "z-ai/glm-5.3-flash".into()]));
         assert_eq!(models_url("http://localhost:20128/v1/"), "http://localhost:20128/v1/models");
