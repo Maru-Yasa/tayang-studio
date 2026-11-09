@@ -809,19 +809,38 @@ fn after_billing<T>(auth: &Arc<Auth>, base: &str, r: Result<T, BillingError>) ->
     r.map_err(billing_err)
 }
 
-/// Starts (or reuses) a QRIS payment for `plan` and opens its page in the browser. The token
-/// stays here; the webview gets the payment link for "Open again". Errors are `billing:<code>`.
+/// Starts (or reuses) a payment for `plan` and opens its pay link (`<api>/pay/…`, which the API
+/// redirects to the provider, or to a WhatsApp chat while payments are off). The token stays here; the
+/// webview gets the link for "Open again". Errors are `billing:<code>`.
 #[tauri::command]
-pub async fn billing_checkout(app: AppHandle, state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, plan: String) -> CmdResult<Checkout> {
+pub async fn billing_checkout(app: AppHandle, state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, plan: String) -> CmdResult<CheckoutStart> {
     let auth = auth.inner().clone();
     let (base, token) = billing_token(&state, &auth).await?;
-    let checkout = after_billing(&auth, &base, crate::billing::checkout(auth.client(), &base, &token, &plan).await)?;
+    let start = after_billing(&auth, &base, crate::billing::checkout(auth.client(), &base, &token, &plan).await)?;
+    let url = match &start {
+        CheckoutStart::Qris(c) => c.pay_url.clone(),
+        CheckoutStart::Whatsapp { url } => url.clone(),
+    };
     use tauri_plugin_opener::OpenerExt;
     // The dialog has "Open again" for when this doesn't work.
-    if let Err(e) = app.opener().open_url(&checkout.payment_link_url, None::<&str>) {
+    if let Err(e) = app.opener().open_url(&url, None::<&str>) {
         eprintln!("[billing] couldn't open the browser: {e}");
     }
-    Ok(checkout)
+    Ok(start)
+}
+
+/// "Open again": opens a pay link the API handed out, if it is one on this API (`<api>/pay/…`);
+/// else `billing:bad_link`. The webview never opens payment pages itself.
+#[tauri::command]
+pub async fn billing_open(app: AppHandle, state: State<'_, AppState>, url: String) -> CmdResult<()> {
+    if !crate::billing::is_pay_link(&url, &api_base(&state)) {
+        return Err(billing_err(BillingError::BadLink));
+    }
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(url.trim(), None::<&str>).map_err(|e| {
+        eprintln!("[billing] couldn't open the browser: {e}");
+        billing_err(BillingError::BadLink)
+    })
 }
 
 /// The signed-in account's plan and any payment in progress. Errors are `billing:<code>`.

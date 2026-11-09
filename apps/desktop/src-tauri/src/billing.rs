@@ -1,25 +1,38 @@
 //! Paid plans. Checkout and status go to the Tayang API with the stored sign-in token, which
-//! stays in Rust: the webview only ever sees the payment link and the plan state.
+//! stays in Rust: the webview only ever sees the pay link and the plan state.
+//!
+//! Every link opened to pay is on the API itself (`<api>/pay/…`), which redirects to wherever the
+//! buyer pays now: a provider's page, or a WhatsApp chat while payments are off. So the app never
+//! needs to know a provider, and a new one needs no app update.
 
 use crate::styles_sync::endpoint;
-use crate::types::{BillingError, BillingStatus, Checkout};
+use crate::types::{BillingError, BillingStatus, Checkout, CheckoutStart};
 
 /// The plans for sale (shared `PAID_PLAN_IDS`).
 pub const PAID_PLANS: [&str; 3] = ["lite", "creator", "pro"];
 
-/// Where SumoPod's payment pages live: the same list as `PAYMENT_LINK_HOSTS` in
-/// packages/shared/src/billing.ts (a test keeps them equal). `*.x` is any subdomain of x.
-pub const PAYMENT_LINK_HOSTS: [&str; 3] = ["pay.sumopod.com", "sumopod.com", "*.pymnt.global"];
+/// A link the app may open to pay: `<api>/pay/<something>` on the API this app talks to (same
+/// scheme, host and port, under its path), with no user info or fragment, and only `plan` and
+/// `email` in the query. The API redirects it on.
+pub fn is_pay_link(u: &str, base: &str) -> bool {
+    let (Ok(url), Ok(root)) = (reqwest::Url::parse(u.trim()), reqwest::Url::parse(&endpoint(base, "/pay/"))) else { return false };
+    let rest = url.path().strip_prefix(root.path()).unwrap_or("");
+    url.scheme() == root.scheme()
+        && url.host_str() == root.host_str()
+        && url.port_or_known_default() == root.port_or_known_default()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.fragment().is_none()
+        && !rest.is_empty()
+        && !rest.contains('/')
+        && url.query_pairs().all(|(k, _)| k == "plan" || k == "email")
+}
 
-/// Only SumoPod's payment pages may be opened from what the API says: https on PAYMENT_LINK_HOSTS.
-pub fn is_payment_link(u: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(u.trim()) else { return false };
-    let host = url.host_str().unwrap_or("");
-    url.scheme() == "https"
-        && PAYMENT_LINK_HOSTS.iter().any(|h| match h.strip_prefix('*') {
-            Some(suffix) => host.ends_with(suffix),
-            None => host == *h,
-        })
+/// The pay link in a 503 `billing_unavailable` answer, if it is one that may open.
+fn pay_link_in(body: &[u8], base: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let url = v.get("payUrl")?.as_str()?;
+    is_pay_link(url, base).then(|| url.to_string())
 }
 
 async fn send(req: reqwest::RequestBuilder) -> Result<(u16, Vec<u8>), BillingError> {
@@ -41,8 +54,9 @@ fn error_for(status: u16) -> BillingError {
     }
 }
 
-/// `POST /v1/billing/checkout { plan }`. Never asks for a plan that isn't for sale.
-pub async fn checkout(client: &reqwest::Client, base: &str, token: &str, plan: &str) -> Result<Checkout, BillingError> {
+/// `POST /v1/billing/checkout { plan }`. Never asks for a plan that isn't for sale. While payments
+/// are off, a 503 that carries this API's pay link (see `is_pay_link`) is a `Whatsapp` start, not an error.
+pub async fn checkout(client: &reqwest::Client, base: &str, token: &str, plan: &str) -> Result<CheckoutStart, BillingError> {
     if !PAID_PLANS.contains(&plan) {
         return Err(BillingError::InvalidPlan);
     }
@@ -54,22 +68,23 @@ pub async fn checkout(client: &reqwest::Client, base: &str, token: &str, plan: &
     match send(req).await? {
         (200..=299, body) => {
             let c = serde_json::from_slice::<Checkout>(&body).ok().filter(|c| !c.order_id.is_empty()).ok_or(BillingError::Server)?;
-            if is_payment_link(&c.payment_link_url) {
-                Ok(c)
+            if is_pay_link(&c.pay_url, base) {
+                Ok(CheckoutStart::Qris(c))
             } else {
                 Err(BillingError::BadLink)
             }
         }
+        (503, body) => pay_link_in(&body, base).map(|url| CheckoutStart::Whatsapp { url }).ok_or(BillingError::Unavailable),
         (status, _) => Err(error_for(status)),
     }
 }
 
-/// `GET /v1/billing/status`. A pending payment whose link isn't a SumoPod page is dropped.
+/// `GET /v1/billing/status`. A pending payment without a pay link on this API is dropped.
 pub async fn status(client: &reqwest::Client, base: &str, token: &str) -> Result<BillingStatus, BillingError> {
     match send(client.get(endpoint(base, "/v1/billing/status")).bearer_auth(token)).await? {
         (200..=299, body) => {
             let mut s = serde_json::from_slice::<BillingStatus>(&body).map_err(|_| BillingError::Server)?;
-            s.pending = s.pending.filter(|p| is_payment_link(&p.payment_link_url));
+            s.pending = s.pending.filter(|p| is_pay_link(&p.pay_url, base));
             Ok(s)
         }
         (status, _) => Err(match error_for(status) {
@@ -83,20 +98,34 @@ pub async fn status(client: &reqwest::Client, base: &str, token: &str) -> Result
 mod tests {
     use super::*;
     use crate::auth::http_client;
-    use crate::auth::tests::{dead_base, fake};
+    use crate::auth::tests::{dead_base, fake, Fake, Req};
 
-    const CHECKOUT: &str = r#"{"orderId":"TYG-ABCDEFGH-1793793600","paymentLinkUrl":"https://pay.sumopod.com/p/1","expiresAt":"2026-11-04T13:00:00.000Z","amount":50000}"#;
-    const STATUS: &str = r#"{"plan":"creator","lastPlan":"creator","currentPeriodEnd":"2026-12-04T12:00:00.000Z","active":true,"pending":{"orderId":"TYG-X","plan":"pro","paymentLinkUrl":"https://checkout.pymnt.global/p/2","expiresAt":"2026-11-04T13:00:00.000Z"},"lastPaidOrderId":"TYG-OLD"}"#;
+    // `{BASE}` is the fake API's own base, filled in as it answers (it is known only once it runs).
+    const CHECKOUT: &str = r#"{"orderId":"TYG-ABCDEFGH-1793793600","payUrl":"{BASE}/pay/TYG-ABCDEFGH-1793793600","paymentLinkUrl":"https://pay.sumopod.com/p/1","expiresAt":"2026-11-04T13:00:00.000Z","amount":50000}"#;
+    const STATUS: &str = r#"{"plan":"creator","lastPlan":"creator","currentPeriodEnd":"2026-12-04T12:00:00.000Z","active":true,"pending":{"orderId":"TYG-X","plan":"pro","payUrl":"{BASE}/pay/TYG-X","paymentLinkUrl":"https://checkout.pymnt.global/p/2","expiresAt":"2026-11-04T13:00:00.000Z"},"lastPaidOrderId":"TYG-OLD"}"#;
+
+    async fn api(handler: impl Fn(&Req) -> (u16, String) + Send + Sync + 'static) -> Fake {
+        let slot = std::sync::Arc::new(std::sync::OnceLock::<String>::new());
+        let seen = slot.clone();
+        let f = fake(move |r, _| {
+            let (status, body) = handler(r);
+            (status, body.replace("{BASE}", seen.get().map(String::as_str).unwrap_or("")))
+        })
+        .await;
+        slot.set(f.base.clone()).unwrap();
+        f
+    }
 
     #[tokio::test]
-    async fn checkout_posts_the_plan_with_the_token() {
-        let f = fake(|r, _| match r.path.as_str() {
+    async fn checkout_posts_the_plan_with_the_token_and_opens_the_api_pay_link() {
+        let f = api(|r| match r.path.as_str() {
             "/api/v1/billing/checkout" => (200, CHECKOUT.into()),
             _ => (404, "{}".into()),
         })
         .await;
-        let c = checkout(&http_client().unwrap(), &f.base, "tyg_abc", "creator").await.unwrap();
-        assert_eq!((c.order_id.as_str(), c.payment_link_url.as_str(), c.amount), ("TYG-ABCDEFGH-1793793600", "https://pay.sumopod.com/p/1", 50000));
+        let Ok(CheckoutStart::Qris(c)) = checkout(&http_client().unwrap(), &f.base, "tyg_abc", "creator").await else { panic!("not a QRIS start") };
+        assert_eq!((c.order_id.as_str(), c.amount), ("TYG-ABCDEFGH-1793793600", 50000));
+        assert_eq!(c.pay_url, format!("{}/pay/TYG-ABCDEFGH-1793793600", f.base));
         let hits = f.hits("/api/v1/billing/checkout");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].method, "POST");
@@ -104,42 +133,68 @@ mod tests {
         assert_eq!(serde_json::from_str::<serde_json::Value>(&hits[0].body).unwrap(), serde_json::json!({ "plan": "creator" }));
     }
 
-    #[test]
-    fn only_sumopod_payment_pages_may_open() {
-        for ok in ["https://pay.sumopod.com/p/1", "https://sumopod.com/pay/1", "https://checkout.pymnt.global/x", "https://PAY.SUMOPOD.COM/p"] {
-            assert!(is_payment_link(ok), "{ok}");
-        }
-        for bad in [
-            "http://pay.sumopod.com/p/1",
-            "https://pay.example/p/1",
-            "https://evil-sumopod.com/p",
-            "https://sumopod.com.evil.net/p",
-            "https://api-pay-sandbox.sumopod.com/p",
-            "https://pymnt.global/p",
-            "https://xpymnt.global/p",
-            "javascript:alert(1)",
-            "file:///etc/passwd",
-            "not a url",
+    #[tokio::test]
+    async fn checkout_refuses_a_pay_link_off_this_api() {
+        for body in [
+            CHECKOUT.replace("{BASE}/pay/", "https://pay.sumopod.com/"),
+            CHECKOUT.replace(r#""payUrl":"{BASE}/pay/TYG-ABCDEFGH-1793793600","#, ""),
+            CHECKOUT.replace("{BASE}/pay/", "https://evil.example/api/pay/"),
         ] {
-            assert!(!is_payment_link(bad), "{bad}");
+            let f = api(move |_| (200, body.clone())).await;
+            assert_eq!(checkout(&http_client().unwrap(), &f.base, "tyg_abc", "lite").await, Err(BillingError::BadLink));
         }
-    }
-
-    #[test]
-    fn payment_hosts_match_the_shared_list() {
-        let ts = include_str!("../../../../packages/shared/src/billing.ts");
-        let start = ts.find("export const PAYMENT_LINK_HOSTS = [").expect("the shared list") + "export const PAYMENT_LINK_HOSTS = [".len();
-        let list = &ts[start..start + ts[start..].find(']').unwrap()];
-        let shared: Vec<&str> = list.split(',').map(|h| h.trim().trim_matches('\'')).filter(|h| !h.is_empty()).collect();
-        assert_eq!(shared, PAYMENT_LINK_HOSTS.to_vec(), "keep billing.rs in step with packages/shared");
+        assert_eq!(serde_json::to_value(BillingError::BadLink).unwrap(), "bad_link");
+        assert_eq!(serde_json::to_value(BillingError::DowngradeNotAllowed).unwrap(), "downgrade_not_allowed");
     }
 
     #[tokio::test]
-    async fn checkout_refuses_a_link_off_the_payment_hosts() {
-        let f = fake(|_, _| (200, CHECKOUT.replace("https://pay.sumopod.com/p/1", "https://pay.example/p/1"))).await;
-        assert_eq!(checkout(&http_client().unwrap(), &f.base, "tyg_abc", "lite").await, Err(BillingError::BadLink));
-        assert_eq!(serde_json::to_value(BillingError::BadLink).unwrap(), "bad_link");
-        assert_eq!(serde_json::to_value(BillingError::DowngradeNotAllowed).unwrap(), "downgrade_not_allowed");
+    async fn checkout_while_off_opens_the_api_pay_link_when_offered() {
+        let f = api(|_| (503, r#"{"error":"billing_unavailable","payUrl":"{BASE}/pay/whatsapp?plan=creator&email=ana%40example.com"}"#.into())).await;
+        let start = checkout(&http_client().unwrap(), &f.base, "tyg_abc", "creator").await.unwrap();
+        let want = format!("{}/pay/whatsapp?plan=creator&email=ana%40example.com", f.base);
+        assert_eq!(start, CheckoutStart::Whatsapp { url: want.clone() });
+        assert_eq!(serde_json::to_value(&start).unwrap(), serde_json::json!({ "kind": "whatsapp", "url": want }));
+        // A link anywhere else (even straight to wa.me) is never opened: plain "unavailable".
+        for other in ["https://wa.me/6281234567890", "https://evil.example/api/pay/whatsapp?plan=creator"] {
+            let bad = fake(move |_, _| (503, format!(r#"{{"error":"billing_unavailable","payUrl":"{other}"}}"#))).await;
+            assert_eq!(checkout(&http_client().unwrap(), &bad.base, "tyg_abc", "creator").await, Err(BillingError::Unavailable), "{other}");
+        }
+    }
+
+    #[test]
+    fn only_pay_links_on_this_api_may_open() {
+        let base = "https://studio.tayang.app/api";
+        for ok in [
+            "https://studio.tayang.app/api/pay/TYG-ABCDEFGH-1793793600",
+            "https://studio.tayang.app/api/pay/whatsapp?plan=creator",
+            "https://studio.tayang.app/api/pay/whatsapp?plan=pro&email=ana%40example.com",
+            "https://STUDIO.tayang.app:443/api/pay/x",
+        ] {
+            assert!(is_pay_link(ok, base), "{ok}");
+        }
+        for bad in [
+            "http://studio.tayang.app/api/pay/x",
+            "https://studio.tayang.app.evil.com/api/pay/x",
+            "https://evil.com/api/pay/x",
+            "https://studio.tayang.app/api/pay/",
+            "https://studio.tayang.app/api/pay/a/b",
+            "https://studio.tayang.app/api/pay/../v1/billing/checkout",
+            "https://studio.tayang.app/api/v1/billing/checkout",
+            "https://studio.tayang.app/pay/x",
+            "https://studio.tayang.app/api/pay/x?next=https://evil.com",
+            "https://user@studio.tayang.app/api/pay/x",
+            "https://studio.tayang.app:8443/api/pay/x",
+            "https://studio.tayang.app/api/pay/x#y",
+            "https://pay.sumopod.com/p/1",
+            "https://wa.me/6281234567890",
+            "javascript:alert(1)",
+            "not a url",
+        ] {
+            assert!(!is_pay_link(bad, base), "{bad}");
+        }
+        // A self-hosted API: its own pay links, nobody else's.
+        assert!(is_pay_link("http://localhost:8787/api/pay/whatsapp?plan=lite", "http://localhost:8787/api"));
+        assert!(!is_pay_link("https://studio.tayang.app/api/pay/whatsapp?plan=lite", "http://localhost:8787/api"));
     }
 
     #[tokio::test]
@@ -158,7 +213,7 @@ mod tests {
             (502, r#"{"error":"payment_provider"}"#, BillingError::PaymentProvider),
             (500, "{}", BillingError::Server),
             (200, "nope", BillingError::Server),
-            (200, r#"{"orderId":"x","paymentLinkUrl":"file:///etc/passwd","expiresAt":"x","amount":1}"#, BillingError::BadLink),
+            (200, r#"{"orderId":"x","payUrl":"file:///etc/passwd","paymentLinkUrl":"x","expiresAt":"x","amount":1}"#, BillingError::BadLink),
             (503, r#"{"error":"billing_unavailable"}"#, BillingError::Unavailable),
             (429, r#"{"error":"rate_limited"}"#, BillingError::RateLimited),
             (409, r#"{"error":"downgrade_not_allowed"}"#, BillingError::DowngradeNotAllowed),
@@ -171,7 +226,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_reads_the_plan_and_pending_payment() {
-        let f = fake(|r, _| match (r.path.as_str(), r.auth.as_deref()) {
+        let f = api(|r| match (r.path.as_str(), r.auth.as_deref()) {
             ("/api/v1/billing/status", Some("Bearer tyg_abc")) => (200, STATUS.into()),
             _ => (401, "{}".into()),
         })
@@ -180,15 +235,17 @@ mod tests {
         assert_eq!((s.plan.as_str(), s.active, s.current_period_end.as_deref()), ("creator", true, Some("2026-12-04T12:00:00.000Z")));
         assert_eq!(s.last_plan.as_deref(), Some("creator"));
         assert_eq!(s.last_paid_order_id.as_deref(), Some("TYG-OLD"));
-        assert_eq!(s.pending.map(|p| p.order_id), Some("TYG-X".into()));
+        assert_eq!(s.pending.map(|p| (p.order_id, p.pay_url)), Some(("TYG-X".into(), format!("{}/pay/TYG-X", f.base))));
         assert_eq!(status(&http_client().unwrap(), &f.base, "tyg_other").await, Err(BillingError::SignedOut));
     }
 
     #[tokio::test]
-    async fn status_drops_a_pending_link_that_is_not_a_web_page() {
-        let f = fake(|_, _| (200, STATUS.replace("https://checkout.pymnt.global/p/2", "javascript:alert(1)"))).await;
-        let s = status(&http_client().unwrap(), &f.base, "tyg_abc").await.unwrap();
-        assert!(s.pending.is_none());
+    async fn status_drops_a_pending_payment_without_a_pay_link_on_this_api() {
+        for body in [STATUS.replace("{BASE}/pay/TYG-X", "javascript:alert(1)"), STATUS.replace(r#""payUrl":"{BASE}/pay/TYG-X","#, "")] {
+            let f = api(move |_| (200, body.clone())).await;
+            let s = status(&http_client().unwrap(), &f.base, "tyg_abc").await.unwrap();
+            assert!(s.pending.is_none());
+        }
         let free = fake(|_, _| (200, r#"{"plan":"free","currentPeriodEnd":null,"active":false,"pending":null}"#.into())).await;
         let s = status(&http_client().unwrap(), &free.base, "tyg_abc").await.unwrap();
         assert_eq!((s.plan.as_str(), s.active, s.current_period_end, s.pending), ("free", false, None, None));

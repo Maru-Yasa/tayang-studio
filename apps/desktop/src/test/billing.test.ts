@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BillingStatus } from '@tayang/shared';
-import { billingErrorCode, billingReminderDue, formatDay, formatIdr, isPaymentLink, planCard } from '@/lib/billing';
+import { isPaymentLink } from '@tayang/shared';
+import { billingErrorCode, billingReminderDue, formatDay, formatIdr, planCard } from '@/lib/billing';
 
 const status = (over: Partial<BillingStatus> = {}): BillingStatus => ({
   plan: 'creator',

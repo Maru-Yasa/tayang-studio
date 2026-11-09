@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { useAuth } from '@/state/auth';
 import { findPlan, isLowerPlan, type BillingStatus, type CheckoutResponse, type PaidPlanId } from '@tayang/shared';
-import { POLL_LIMIT_MS, POLL_MS, billingCheckout, billingErrorCode, billingStatus, isPaymentLink, type BillingErrorCode } from '@/lib/billing';
+import { POLL_LIMIT_MS, POLL_MS, WHATSAPP_POLL_MS, billingCheckout, billingErrorCode, billingStatus, type BillingErrorCode } from '@/lib/billing';
 import { track } from '@/lib/analytics';
 
 /** The plans screen: 1 pick, 2 review and pay (starting / waiting / expired / failed), 3 done.
@@ -13,6 +13,8 @@ export type PayFlow =
   | { phase: 'starting'; plan: PaidPlanId }
   | { phase: 'waiting'; plan: PaidPlanId; checkout: CheckoutResponse; endBefore: string | null; startedAt: number }
   | { phase: 'expired'; plan: PaidPlanId; checkout: CheckoutResponse; endBefore: string | null }
+  /** Payments are off: the buyer continues in WhatsApp, and the owner activates the plan by hand. */
+  | { phase: 'whatsapp'; plan: PaidPlanId; url: string; endBefore: string | null }
   | { phase: 'done'; plan: PaidPlanId; currentPeriodEnd: string | null }
   | { phase: 'failed'; plan: PaidPlanId; error: BillingErrorCode | { message: string } };
 
@@ -89,6 +91,25 @@ export const useBilling = create<BillingStore>((set, get) => {
     pollTimer = setTimeout(() => void step(), POLL_MS);
   };
 
+  /** Payments are off: asks every WHATSAPP_POLL_MS until the owner has activated a plan (the period
+   * end moved past the one seen before), the flow closes, or POLL_LIMIT_MS passes (the screen stays). */
+  const pollActivation = (attempt: number, plan: PaidPlanId, endBefore: string | null) => {
+    stopPolling();
+    const until = Date.now() + POLL_LIMIT_MS;
+    const step = async () => {
+      if (get().attempt !== attempt) return;
+      const s = await get().refresh();
+      if (get().attempt !== attempt) return;
+      const end = s?.active ? s.currentPeriodEnd : null;
+      if (s && end && (endBefore === null || Date.parse(end) > Date.parse(endBefore))) {
+        set({ flow: { phase: 'done', plan: s.plan !== 'free' ? s.plan : plan, currentPeriodEnd: end } });
+        return;
+      }
+      if (Date.now() < until) pollTimer = setTimeout(() => void step(), WHATSAPP_POLL_MS);
+    };
+    pollTimer = setTimeout(() => void step(), WHATSAPP_POLL_MS);
+  };
+
   /** Starts waiting on `checkout`. */
   const wait = (attempt: number, plan: PaidPlanId, endBefore: string | null, checkout: CheckoutResponse) => {
     set({ flow: { phase: 'waiting', plan, checkout, endBefore, startedAt: Date.now() } });
@@ -129,12 +150,13 @@ export const useBilling = create<BillingStore>((set, get) => {
       set({ attempt, flow: { phase: 'picking' } });
       const s = await get().refresh();
       const p = s?.pending;
-      if (get().attempt !== attempt || !p || !isPaymentLink(p.paymentLinkUrl)) return;
+      // Rust keeps a pending payment only with a pay link on this API.
+      if (get().attempt !== attempt || !p?.payUrl) return;
       const plan = findPlan(p.plan);
       if (!plan) return;
       // The API doesn't offer a link below the running plan; don't resume one either.
       if (s?.active && isLowerPlan(plan.id, s.plan)) return;
-      const checkout = { orderId: p.orderId, paymentLinkUrl: p.paymentLinkUrl, expiresAt: p.expiresAt, amount: plan.price };
+      const checkout = { orderId: p.orderId, payUrl: p.payUrl, paymentLinkUrl: p.paymentLinkUrl, expiresAt: p.expiresAt, amount: plan.price };
       wait(attempt, plan.id, s?.currentPeriodEnd ?? null, checkout);
     },
 
@@ -168,8 +190,15 @@ export const useBilling = create<BillingStore>((set, get) => {
       try {
         const checkout = await billingCheckout(plan);
         if (get().attempt !== attempt) return;
+        if (checkout.kind === 'whatsapp') {
+          track('plan whatsapp opened', { plan });
+          set({ flow: { phase: 'whatsapp', plan, url: checkout.url, endBefore } });
+          pollActivation(attempt, plan, endBefore);
+          return;
+        }
         track('plan checkout started', { plan });
-        if (!isPaymentLink(checkout.paymentLinkUrl)) {
+        // Rust only answers with a pay link on this API; nothing else is opened.
+        if (!checkout.payUrl) {
           set({ flow: { phase: 'failed', plan, error: 'bad_link' } });
           return;
         }
