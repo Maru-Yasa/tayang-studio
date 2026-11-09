@@ -278,6 +278,28 @@ export interface Settings {
   projectStatusChecked: boolean;
   /** The model picked for each agent (agent id → the agent's own model value); missing: its default. */
   agentModels: Partial<Record<AgentId, string>>;
+  /** "Your API" (the `custom` agent): provider preset, address and model. The key stays in the keychain. */
+  apiProvider?: ApiProvider | null;
+}
+
+/** A provider preset: `other` is any OpenAI-compatible address the user types. */
+export type ApiProviderId = 'deepseek' | '9router' | 'commandcode' | 'other';
+
+export interface ApiProvider {
+  provider: ApiProviderId;
+  baseUrl: string;
+  model: string;
+}
+
+/** Why checking an API key failed. */
+export type ApiFailure = 'unauthorized' | 'noBalance' | 'upgradeRequired' | 'unreachable' | 'notFound' | 'other';
+
+/** The answer of `api_check`: the models the key can use, or why it can't. */
+export interface ApiCheck {
+  ok: boolean;
+  models: string[];
+  failure: ApiFailure | null;
+  detail: string | null;
 }
 
 /** Defaults; workingFolder is `<home>/Tayang`, resolved at runtime. */

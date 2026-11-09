@@ -48,6 +48,11 @@ keyring = { version = "=3.6.3", features = ["windows-native"] }
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 keyring = { version = "=3.6.3", features = ["async-secret-service", "async-io", "crypto-rust"] }
 
+# The "Your API" engine ships as .tar.gz on Linux (zip elsewhere).
+[target.'cfg(target_os = "linux")'.dependencies]
+flate2 = "1"
+tar = "0.4"
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["test-util"] }

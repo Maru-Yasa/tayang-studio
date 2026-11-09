@@ -464,6 +464,9 @@ pub struct Settings {
     /// agent's own default.
     #[serde(default)]
     pub agent_models: std::collections::BTreeMap<String, String>,
+    /// "Your API" (the `custom` agent): the provider, address and model. The key is in the keychain.
+    #[serde(default)]
+    pub api_provider: Option<crate::api_engine::ApiProvider>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

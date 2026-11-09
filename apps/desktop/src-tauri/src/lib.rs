@@ -1,5 +1,6 @@
 pub mod acp;
 pub mod ai_proxy;
+pub mod api_engine;
 pub mod auth;
 pub mod claude_account;
 pub mod billing;
