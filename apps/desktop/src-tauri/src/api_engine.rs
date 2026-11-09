@@ -55,8 +55,15 @@ pub fn models_url(base_url: &str) -> String {
 /// The model ids in an OpenAI-style `GET /models` answer (`{ "data": [{ "id" }] }`), sorted.
 pub fn parse_models(body: &Value) -> Option<Vec<String>> {
     let data = body.get("data")?.as_array()?;
+    // Some routers (CommandCode) list models that only speak another format, like Anthropic's
+    // `/messages`; the engine calls `/chat/completions`, so those are left out.
+    let chat = |m: &&Value| match m.get("supported_endpoints").and_then(Value::as_array) {
+        Some(eps) => eps.iter().any(|e| e.as_str() == Some("/chat/completions")),
+        None => true,
+    };
     let mut ids: Vec<String> = data
         .iter()
+        .filter(chat)
         .filter_map(|m| m.get("id").and_then(Value::as_str))
         .map(str::to_string)
         .collect();
@@ -151,6 +158,28 @@ pub async fn check(client: &reqwest::Client, base_url: &str, key: &str) -> ApiCh
         Some(models) if !models.is_empty() => ApiCheck { ok: true, models, failure: None, detail: None },
         Some(_) => ApiCheck::failed(ApiFailure::Other, Some("The provider returned no models".into())),
         None => ApiCheck::failed(ApiFailure::NotFound, error_detail(&body)),
+    }
+}
+
+/// One real one-token chat call with `model`: the only proof that the key, the balance and the model
+/// all work (some providers list their models without asking for a key).
+pub async fn try_model(client: &reqwest::Client, base_url: &str, key: &str, model: &str) -> ApiCheck {
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let body = json!({ "model": model, "messages": [{ "role": "user", "content": "Say ok" }], "max_tokens": 1, "stream": false });
+    let mut req = client.post(url).header("content-type", "application/json").body(body.to_string());
+    if !key.trim().is_empty() {
+        req = req.bearer_auth(key.trim());
+    }
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => return ApiCheck::failed(ApiFailure::Unreachable, Some(e.to_string())),
+    };
+    let status = resp.status().as_u16();
+    let text = resp.text().await.unwrap_or_default();
+    if (200..300).contains(&status) {
+        ApiCheck { ok: true, models: vec![model.to_string()], failure: None, detail: None }
+    } else {
+        ApiCheck::failed(classify_failure(status, &text), error_detail(&text))
     }
 }
 
@@ -364,6 +393,12 @@ mod tests {
         let body = json!({ "object": "list", "data": [{ "id": "deepseek-reasoner" }, { "id": "deepseek-chat" }, { "id": "deepseek-chat" }] });
         assert_eq!(parse_models(&body), Some(vec!["deepseek-chat".into(), "deepseek-reasoner".into()]));
         assert_eq!(parse_models(&json!({ "error": "x" })), None);
+        let mixed = json!({ "data": [
+            { "id": "claude-sonnet-5", "supported_endpoints": ["/messages"] },
+            { "id": "z-ai/glm-5.3-flash", "supported_endpoints": ["/chat/completions"] },
+            { "id": "plain" },
+        ] });
+        assert_eq!(parse_models(&mixed), Some(vec!["plain".into(), "z-ai/glm-5.3-flash".into()]));
         assert_eq!(models_url("http://localhost:20128/v1/"), "http://localhost:20128/v1/models");
     }
 
@@ -434,5 +469,20 @@ mod tests {
         assert!(!root.join("opencode-0.1.0").exists());
         assert!(root.join(format!("opencode-{ENGINE_VERSION}")).exists());
         assert!(root.join("config").exists());
+    }
+
+    /// Downloads the real release (about 70 MB): `cargo test -- --ignored downloads_the_real_engine`.
+    #[tokio::test]
+    #[ignore]
+    async fn downloads_the_real_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = reqwest::Client::builder().user_agent("tayang-studio-test").build().unwrap();
+        let seen = std::sync::atomic::AtomicU64::new(0);
+        let bin = install_engine(&client, dir.path(), |d, _| seen.store(d, std::sync::atomic::Ordering::Relaxed)).await.unwrap();
+        assert!(seen.load(std::sync::atomic::Ordering::Relaxed) > 10_000_000);
+        let out = std::process::Command::new(&bin).arg("--version").output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), ENGINE_VERSION);
+        assert_eq!(installed_engine(dir.path()), Some(bin));
+        assert!(std::fs::read_dir(engine_root(dir.path())).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".part")));
     }
 }

@@ -13,6 +13,7 @@ import {
   apiReachable,
   apiSave,
   apiStatus,
+  apiTry,
   engineInstall,
   type EngineProgress,
 } from '@/lib/ipc';
@@ -125,6 +126,24 @@ export function ApiSetupDialog({
   const save = async () => {
     setBusy(true);
     setError(null);
+    const keyArg = canUseSavedKey ? null : key.trim();
+    // Listing models doesn't always need a key: one real call proves the key, the balance and the model.
+    try {
+      const tried = await apiTry(baseUrl, keyArg, model);
+      if (!tried.ok) {
+        if (live.current) {
+          setError([failureText(tried), tried.detail].filter(Boolean).join(' · '));
+          setBusy(false);
+        }
+        return;
+      }
+    } catch (e) {
+      if (live.current) {
+        setError(String(e));
+        setBusy(false);
+      }
+      return;
+    }
     const off = await listen<EngineProgress>(ENGINE_PROGRESS_EVENT, (e) => live.current && setProgress(e.payload));
     try {
       try {
@@ -134,7 +153,7 @@ export function ApiSetupDialog({
         return;
       }
       try {
-        const settings = await apiSave({ provider, baseUrl, model }, canUseSavedKey ? null : key.trim());
+        const settings = await apiSave({ provider, baseUrl, model }, keyArg);
         track('agent connected', { agent: 'custom', provider });
         onSaved(settings);
         onOpenChange(false);

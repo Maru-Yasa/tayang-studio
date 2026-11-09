@@ -103,6 +103,7 @@ pub fn run() {
             commands::detect_agents,
             commands::api_status,
             commands::api_check,
+            commands::api_try,
             commands::api_reachable,
             commands::api_save,
             commands::api_clear,

@@ -2059,6 +2059,19 @@ pub async fn api_check(keys: State<'_, ApiKeys>, base_url: String, key: Option<S
     Ok(crate::api_engine::check(&client, &base, &key).await)
 }
 
+/// One real one-token call with `model`, before saving: proves the key, the balance and the model.
+/// No `key`: the saved one.
+#[tauri::command]
+pub async fn api_try(keys: State<'_, ApiKeys>, base_url: String, key: Option<String>, model: String) -> CmdResult<crate::api_engine::ApiCheck> {
+    let base = crate::api_engine::clean_base_url(&base_url).ok_or("Type an address that starts with https:// or http://")?;
+    let key = match key {
+        Some(k) => k,
+        None => keys.get().await?.unwrap_or_default(),
+    };
+    let client = api_client(std::time::Duration::from_secs(60))?;
+    Ok(crate::api_engine::try_model(&client, &base, &key, model.trim()).await)
+}
+
 /// Whether something answers at `base_url` (a local 9router).
 #[tauri::command]
 pub async fn api_reachable(base_url: String) -> CmdResult<bool> {

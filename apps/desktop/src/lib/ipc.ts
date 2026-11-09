@@ -41,6 +41,8 @@ export interface ApiStatus {
 export const apiStatus = () => invoke<ApiStatus>('api_status');
 /** Lists the models at `baseUrl`, which checks the key too; no `key` checks the saved one. */
 export const apiCheck = (baseUrl: string, key: string | null) => invoke<ApiCheck>('api_check', { baseUrl, key });
+/** One real one-token call with `model` before saving; no `key` uses the saved one. */
+export const apiTry = (baseUrl: string, key: string | null, model: string) => invoke<ApiCheck>('api_try', { baseUrl, key, model });
 export const apiReachable = (baseUrl: string) => invoke<boolean>('api_reachable', { baseUrl });
 /** Saves the provider (and the key, when given) and makes Your API the default agent. */
 export const apiSave = (provider: ApiProvider, key: string | null) => invoke<Settings>('api_save', { provider, key });

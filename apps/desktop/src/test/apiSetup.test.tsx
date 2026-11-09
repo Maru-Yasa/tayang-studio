@@ -7,6 +7,7 @@ vi.mock('@/lib/ipc', () => ({
   ENGINE_PROGRESS_EVENT: 'engine://progress',
   apiStatus: vi.fn(),
   apiCheck: vi.fn(),
+  apiTry: vi.fn(),
   apiReachable: vi.fn(),
   apiSave: vi.fn(),
   engineInstall: vi.fn(),
@@ -25,6 +26,7 @@ beforeEach(() => {
   vi.mocked(ipc.apiReachable).mockResolvedValue(false);
   vi.mocked(ipc.engineInstall).mockResolvedValue(undefined);
   vi.mocked(ipc.apiSave).mockResolvedValue(saved);
+  vi.mocked(ipc.apiTry).mockImplementation(async (_b, _k, model) => ({ ok: true, models: [model], failure: null, detail: null }));
 });
 
 describe('ApiSetupDialog', () => {
@@ -44,6 +46,7 @@ describe('ApiSetupDialog', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save and connect' }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved));
+    expect(ipc.apiTry).toHaveBeenCalledWith('https://api.deepseek.com', 'sk-123', 'deepseek-chat');
     expect(ipc.engineInstall).toHaveBeenCalled();
     expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' }, 'sk-123');
     expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -89,5 +92,19 @@ describe('ApiSetupDialog', () => {
     expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('deepseek-reasoner');
     await user.click(screen.getByRole('button', { name: 'Save and connect' }));
     await waitFor(() => expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner' }, null));
+  });
+
+  it('does not save when the real call fails, even if the model list loaded', async () => {
+    vi.mocked(ipc.apiCheck).mockResolvedValue({ ok: true, models: ['gpt-5.5'], failure: null, detail: null });
+    vi.mocked(ipc.apiTry).mockResolvedValue({ ok: false, models: [], failure: 'unauthorized', detail: "Invalid 'Authorization' header or token." });
+    render(<ApiSetupDialog open onOpenChange={() => {}} onSaved={() => {}} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /CommandCode/ }));
+    await user.type(screen.getByLabelText(/API key/), 'bad');
+    await user.click(screen.getByRole('button', { name: 'Check key' }));
+    await user.click(await screen.findByRole('button', { name: 'Save and connect' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', "The key was refused. Copy it again from your provider. · Invalid 'Authorization' header or token.");
+    expect(ipc.engineInstall).not.toHaveBeenCalled();
+    expect(ipc.apiSave).not.toHaveBeenCalled();
   });
 });

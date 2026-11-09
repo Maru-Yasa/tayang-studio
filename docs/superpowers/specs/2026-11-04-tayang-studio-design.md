@@ -312,7 +312,7 @@ Before planning, this document gets a builder check: a fresh reader looks for ga
 **What the user sees.** The fifth row of Connect your agent (and of Settings › Agents), until now the empty "other agent" slot (`custom`), becomes **Your API** ("API sendiri"). Setting it up is one dialog with three steps:
 1. **Pick a provider:** DeepSeek, 9router, CommandCode or Other (any OpenAI-compatible address). 9router is marked "running on this computer" when `localhost:20128` answers.
 2. **Paste the key** (with a "get a key" link for each provider) **and pick a model** from the list the provider returns for that key.
-3. **Test:** the same call that lists the models checks the key. A failure is told in plain words: wrong key, no balance, plan too low (CommandCode's `upgrade_required`), or 9router not running.
+3. **Test:** listing the models checks the address (and the key where the provider asks for one). Before saving, one real one-token chat call with the picked model proves the key, the balance and the model, because some providers (CommandCode) list models without a key. Models a provider marks as not speaking `/chat/completions` (CommandCode's Claude models are Anthropic-format only) are left out. A failure is told in plain words: wrong key, no balance, plan too low (CommandCode's `upgrade_required`), or 9router not running.
 
 The key is stored in the OS keychain (same store as the Tayang sign-in), never in SQLite and never sent to Tayang's API. Provider, address and model are ordinary settings.
 
