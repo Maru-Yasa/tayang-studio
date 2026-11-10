@@ -1816,6 +1816,19 @@ pub fn latest_render_info(state: State<'_, AppState>, project_id: String) -> Cmd
     Ok(media::latest_render_info(&folder))
 }
 
+/// Opens the project's newest render in the system's video player. The path is found here, so the
+/// webview can't ask to open any other file. Errors when the project has no render yet.
+#[tauri::command]
+pub async fn open_latest_render(app: AppHandle, state: State<'_, AppState>, project_id: String) -> CmdResult<()> {
+    let folder = project_folder(&state, &project_id)?;
+    let video = tauri::async_runtime::spawn_blocking(move || media::latest_render(&folder))
+        .await
+        .map_err(err)?
+        .ok_or_else(|| "This video has no render yet".to_string())?;
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_path(video.to_string_lossy(), None::<&str>).map_err(err)
+}
+
 /// The newest `*.mp4` where renders land (empty too), for spotting a render that is being written.
 #[tauri::command]
 pub async fn newest_video_info(state: State<'_, AppState>, project_id: String) -> CmdResult<Option<crate::types::FileInfo>> {
