@@ -1781,6 +1781,25 @@ describe('Settings', () => {
     localStorage.clear();
   });
 
+  it("How to install opens the agent's own install guide, not onboarding", async () => {
+    vi.mocked(ipc.detectAgents).mockResolvedValue([
+      { id: 'antigravity', name: 'Antigravity CLI', installed: false, version: null, acpCommand: ['agy', 'acp'], recommended: false },
+    ] as never);
+    openSettingsTab('agents');
+    render(<SettingsScreen />);
+    const link = await screen.findByRole('link', { name: 'How to install' });
+    expect(link).toHaveAttribute('href', 'https://antigravity.google/docs/getting-started?tab=cli');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('keeps the API address under Advanced, closed while it is the default', async () => {
+    openSettingsTab('account');
+    render(<SettingsScreen />);
+    const advanced = (await screen.findByText('Advanced')).closest('details')!;
+    expect(advanced).not.toHaveAttribute('open');
+    expect(within(advanced).getByLabelText('API address')).toBeInTheDocument();
+  });
+
   it('background mode saves through updateSettings; open at login is disabled until it is on', async () => {
     openSettingsTab('agents');
     render(<SettingsScreen />);
