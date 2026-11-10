@@ -12,6 +12,7 @@ pub mod files;
 pub mod media;
 pub mod projects;
 pub mod scheduler;
+pub mod skills;
 pub mod styles_sync;
 pub mod system;
 pub mod telemetry;
