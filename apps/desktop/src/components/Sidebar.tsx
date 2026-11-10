@@ -1,7 +1,7 @@
 import { UpgradeCard } from '@/components/UpgradeCard';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Archive, Calendar, LayoutPanelLeft, Share2, MessageCircle, Palette, Plane, Plus, Smartphone, SlidersHorizontal } from 'lucide-react';
+import { Archive, Calendar, LayoutPanelLeft, Share2, MessageCircle, Palette, Plane, Plus, Smartphone, SlidersHorizontal, Sparkles } from 'lucide-react';
 import type { RecentChat } from '@tayang/shared';
 import logo from '@/assets/brand/tayang-horizontal-reversed-color.svg';
 import mark from '@/assets/brand/oyen-symbol-color.svg';
@@ -29,7 +29,7 @@ const DOT: Record<ChatStatus, string> = {
   idle: 'bg-[#4A4A4A]',
 };
 
-export type SidebarKey = 'chat' | 'videos' | 'social' | 'style' | 'autopilot' | 'agents' | 'calendar' | 'settings';
+export type SidebarKey = 'chat' | 'videos' | 'social' | 'style' | 'autopilot' | 'agents' | 'skills' | 'calendar' | 'settings';
 
 const NAV: { key: SidebarKey; icon: typeof Calendar; route: Route }[] = [
   { key: 'chat', icon: MessageCircle, route: { name: 'chat-new' } },
@@ -38,6 +38,7 @@ const NAV: { key: SidebarKey; icon: typeof Calendar; route: Route }[] = [
   { key: 'style', icon: Palette, route: { name: 'style' } },
   { key: 'autopilot', icon: Plane, route: { name: 'autopilot' } },
   { key: 'agents', icon: LayoutPanelLeft, route: { name: 'agents' } },
+  { key: 'skills', icon: Sparkles, route: { name: 'skills' } },
   { key: 'calendar', icon: Calendar, route: { name: 'calendar' } },
 ];
 
@@ -86,14 +87,14 @@ function NavItem({
           onClick();
         }}
         className={cn(
-          'relative flex h-9 items-center rounded-md text-[14px] font-medium no-underline transition-colors',
-          rail ? 'w-10 justify-center' : 'gap-3 px-3',
+          'relative flex h-8 items-center rounded-md text-[13px] font-medium no-underline transition-colors',
+          rail ? 'w-9 justify-center' : 'gap-2.5 px-2.5',
           active
             ? 'bg-raised text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
             : 'text-text-2 hover:bg-raised/50 hover:text-foreground',
         )}
       >
-        <Icon size={18} strokeWidth={1.5} aria-hidden="true" className="shrink-0" />
+        <Icon size={16} strokeWidth={1.5} aria-hidden="true" className="shrink-0" />
         {!rail && <span className="truncate">{label}</span>}
         {!rail && badge && ' '}
         {!rail && badge && (
@@ -176,11 +177,11 @@ export function Sidebar({ active, collapsed = false }: { active: SidebarKey; col
       >
         {rail ? (
           // The macOS window buttons sit over the rail's top: the logo starts below them.
-          <div className="flex justify-center pb-5 pt-11" data-tauri-drag-region>
+          <div className="flex justify-center pb-4 pt-11" data-tauri-drag-region>
             <img src={mark} alt="Tayang" className="block size-7" />
           </div>
         ) : (
-          <div className="flex items-center gap-2 px-2 pb-5 pt-6" data-tauri-drag-region>
+          <div className="flex items-center gap-2 px-2 pb-4 pt-5" data-tauri-drag-region>
             <img src={logo} alt="Tayang" className="block h-7 w-auto" />
             <span className="mt-1 text-[13px] text-text-3">{t('sidebar.studio')}</span>
           </div>
@@ -190,7 +191,7 @@ export function Sidebar({ active, collapsed = false }: { active: SidebarKey; col
           <Button
             variant="secondary"
             aria-label={rail ? t('sidebar.newChat') : undefined}
-            className={cn('mb-4', rail ? 'size-10 px-0' : 'w-full')}
+            className={cn('mb-3 h-8 text-[13px]', rail ? 'size-9 px-0' : 'w-full')}
             onClick={() => navigate({ name: 'chat-new' })}
           >
             <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
@@ -198,7 +199,7 @@ export function Sidebar({ active, collapsed = false }: { active: SidebarKey; col
           </Button>
         </RailTip>
 
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-px">
           {NAV.map((n) => (
             <NavItem
               key={n.key}
@@ -214,8 +215,8 @@ export function Sidebar({ active, collapsed = false }: { active: SidebarKey; col
         </div>
 
         {!rail && (
-          <div data-recent className="scrollbar-on-hover mt-6 flex min-h-0 flex-col gap-1 overflow-y-auto">
-            <span className="px-3 pb-1 text-xs text-text-3">{t('sidebar.recent')}</span>
+          <div data-recent className="scrollbar-on-hover mt-4 flex min-h-0 flex-col gap-px overflow-y-auto">
+            <span className="px-2.5 pb-1 text-xs text-text-3">{t('sidebar.recent')}</span>
             {recent.slice(0, RECENT).map((c) => {
               const st = status(c.id);
               const name = c.projectTitle ?? c.title;
@@ -229,7 +230,7 @@ export function Sidebar({ active, collapsed = false }: { active: SidebarKey; col
                       openChat(c);
                     }}
                     className={cn(
-                      'flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-[13px] text-[#D9D9D9] no-underline hover:bg-raised/50',
+                      'flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-[13px] text-[#D9D9D9] no-underline hover:bg-raised/50',
                       openChatId === c.id && 'bg-raised/50',
                       st !== 'working' && 'group-hover:pr-9 group-focus-within:pr-9',
                     )}
@@ -258,7 +259,7 @@ export function Sidebar({ active, collapsed = false }: { active: SidebarKey; col
               <button
                 type="button"
                 onClick={() => setSeeAll(true)}
-                className="flex h-8 shrink-0 cursor-pointer items-center rounded-md px-3 text-left text-[13px] text-text-3 hover:bg-raised/50 hover:text-foreground"
+                className="flex h-7 shrink-0 cursor-pointer items-center rounded-md px-2.5 text-left text-[13px] text-text-3 hover:bg-raised/50 hover:text-foreground"
               >
                 {t('sidebar.seeAll')}
               </button>
@@ -267,7 +268,7 @@ export function Sidebar({ active, collapsed = false }: { active: SidebarKey; col
           </div>
         )}
 
-        <div className={cn('mt-auto flex shrink-0 flex-col gap-3 pt-3', rail && 'items-center')}>
+        <div className={cn('mt-auto flex shrink-0 flex-col gap-2 pt-3', rail && 'items-center')}>
           {/* i18n-ignore: an analytics id, not copy */}
           {!rail && <UpgradeCard where="sidebar" />}
           <NavItem
