@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CalendarClock, FileVideo, Search } from 'lucide-react';
+import { CalendarClock, FolderOpen, Search } from 'lucide-react';
 import type { Project, ProjectStatus } from '@tayang/shared';
 import { Button } from '@/components/Button';
 import { Oyen } from '@/components/Oyen';
@@ -9,7 +9,7 @@ import { SmallPoster, useVideoThumb } from '@/components/VideoPoster';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { locale } from '@/i18n';
-import { listProjects, openLatestRender } from '@/lib/ipc';
+import { listProjects, showVideoInFolder } from '@/lib/ipc';
 import { openProjectChat } from '@/lib/openProject';
 import { ago, mmss } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -105,7 +105,7 @@ export function Videos() {
             <span className="hidden w-14 shrink-0 @2xl:block">{t('videos.columns.length')}</span>
             <span className="hidden w-40 shrink-0 @3xl:block">{t('videos.columns.schedule')}</span>
             <span className="hidden w-24 shrink-0 text-right @xl:block">{t('videos.columns.updated')}</span>
-            {/* The file and schedule buttons. */}
+            {/* The folder and schedule buttons. */}
             <span className="w-[72px] shrink-0" />
           </div>
           <ul aria-label={t('videos.title')} className="m-0 flex list-none flex-col p-0">
@@ -128,8 +128,8 @@ export function Videos() {
 
 /**
  * One video as a compact row: its picture, title and kind, status, length, schedule and when it last
- * changed. The row opens the video's chat (where everything else is); the file button opens the newest
- * render in the system's video player; the clock schedules it.
+ * changed. The row opens the video's chat (where everything else is); the folder button shows its newest
+ * render (or its project folder) in the file manager; the clock schedules it.
  */
 function VideoRow({ project: p, onSchedule }: { project: Project; onSchedule(): void }) {
   const { t } = useTranslation();
@@ -168,19 +168,17 @@ function VideoRow({ project: p, onSchedule }: { project: Project; onSchedule(): 
         )}
       </span>
       <span className="pointer-events-none hidden w-24 shrink-0 text-right text-xs text-text-3 @xl:block">{ago(p.updatedAt)}</span>
-      {/* The file and schedule buttons, together as wide as the header's last column. */}
+      {/* The folder and schedule buttons, together as wide as the header's last column. */}
       <span className="relative flex w-[72px] shrink-0 items-center justify-end gap-2">
-        {thumb.src && !thumb.rendering && (
-          <button
-            type="button"
-            aria-label={t('videos.openFileFor', { title: p.title })}
-            title={t('videos.openFile')}
-            onClick={() => void openLatestRender(p.id).catch(() => {})}
-            className="relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-text-3 opacity-0 group-hover:opacity-100 hover:bg-raised hover:text-foreground focus-visible:opacity-100"
-          >
-            <FileVideo size={16} strokeWidth={1.5} aria-hidden="true" />
-          </button>
-        )}
+        <button
+          type="button"
+          aria-label={t('videos.showInFolderFor', { title: p.title })}
+          title={t('videos.showInFolder')}
+          onClick={() => void showVideoInFolder(p.id).catch(() => {})}
+          className="relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-text-3 opacity-0 group-hover:opacity-100 hover:bg-raised hover:text-foreground focus-visible:opacity-100"
+        >
+          <FolderOpen size={16} strokeWidth={1.5} aria-hidden="true" />
+        </button>
         <button
           type="button"
           aria-label={t('schedule.actionFor', { title: p.title })}

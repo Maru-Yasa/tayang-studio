@@ -789,8 +789,8 @@ export const en = {
   videos: {
     columns: { video: 'Video', status: 'Status', length: 'Length', schedule: 'Schedule', updated: 'Updated' },
     open: 'Open {{title}}',
-    openFile: 'Open video file',
-    openFileFor: 'Open the video file of {{title}}',
+    showInFolder: 'Show in folder',
+    showInFolderFor: 'Show {{title}} in its folder',
     noMatch: 'No videos match',
     noPreview: 'No preview yet',
     renderingNow: 'Rendering…',
