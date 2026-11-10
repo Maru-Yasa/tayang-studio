@@ -783,6 +783,8 @@ export const id: Translations = {
   videos: {
     columns: { video: 'Video', status: 'Status', length: 'Durasi', schedule: 'Jadwal', updated: 'Diubah' },
     open: 'Buka {{title}}',
+    openFile: 'Buka file video',
+    openFileFor: 'Buka file video {{title}}',
     noMatch: 'Tidak ada video yang cocok',
     noPreview: 'Belum ada pratinjau',
     renderingNow: 'Sedang merender…',

@@ -17,6 +17,8 @@ vi.mock('@/lib/ipc', () => ({
   deleteAutopilot: vi.fn().mockResolvedValue(undefined),
   updateSlot: vi.fn(),
   listProjects: vi.fn(),
+  videoThumbnail: vi.fn().mockResolvedValue(null),
+  openLatestRender: vi.fn().mockResolvedValue(undefined),
   updateProject: vi.fn(),
   setSchedule: vi.fn(),
   setPosted: vi.fn(),
@@ -176,6 +178,17 @@ describe('Videos', () => {
     expect(screen.getAllByText('Rendered one').length).toBeGreaterThan(0);
     expect(screen.queryByText('Draft one')).not.toBeInTheDocument();
     expect(screen.queryByText('Building one')).not.toBeInTheDocument();
+  });
+
+  it('opens the video file of a rendered video, and offers no file without a render', async () => {
+    vi.mocked(ipc.listProjects).mockResolvedValue([project('a', 'Rendered one', 'rendered'), project('b', 'Draft one', 'draft')]);
+    vi.mocked(ipc.videoThumbnail).mockImplementation(async (id) =>
+      id === 'a' ? { path: '/thumbs/a.jpg', modifiedAt: '2026-11-04T10:00:00.000Z', durationSec: 12 } : null,
+    );
+    render(<Videos />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Open the video file of Rendered one' }));
+    expect(ipc.openLatestRender).toHaveBeenCalledWith('a');
+    expect(screen.queryByRole('button', { name: 'Open the video file of Draft one' })).not.toBeInTheDocument();
   });
 
   it('shows the empty state', async () => {
