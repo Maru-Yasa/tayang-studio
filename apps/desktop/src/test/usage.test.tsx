@@ -104,12 +104,13 @@ describe('status bar: the agent in use, all of them in the popover', () => {
     expect(await screen.findByText('Usage')).toBeInTheDocument();
     expect(screen.getByText('all agents')).toBeInTheDocument();
     expect(screen.getAllByTestId('usage-row')).toHaveLength(2);
-    expect(screen.getByText(/^Resets in /)).toBeInTheDocument();
+    // The fixture's session reset is already past: no "Resets in now".
+    expect(screen.getByText('Resets any moment')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'Fable usage' })).toHaveAttribute('aria-valuenow', '85');
 
     await userEvent.click(screen.getByRole('button', { name: 'Compact' }));
     expect(localStorage.getItem('tayang.usageView')).toBe('compact');
-    expect(screen.queryByText(/^Resets in /)).not.toBeInTheDocument();
+    expect(screen.queryByText('Resets any moment')).not.toBeInTheDocument();
 
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh usage' }));
     await waitFor(() => expect(getAgentUsage).toHaveBeenLastCalledWith(true));

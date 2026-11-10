@@ -154,7 +154,7 @@ describe('a project chat build job at the end of a turn', () => {
     await emit('c1', { kind: 'done', stopReason: 'end_turn' });
     await waitFor(() => expect(lastJob()).toMatchObject({ status: 'needs-you', note: 'No video yet. The agent stopped before rendering' }));
     setUiLanguage('id');
-    expect(localized(lastJob().note!)).toBe('Belum ada video. Agent berhenti sebelum render');
+    expect(localized(lastJob().note!)).toBe('Belum ada video. Agen berhenti sebelum videonya jadi');
   });
 
   it('needs your answer when the agent ended on a question', async () => {
@@ -164,7 +164,7 @@ describe('a project chat build job at the end of a turn', () => {
     await emit('c1', { kind: 'done', stopReason: 'end_turn' });
     await waitFor(() => expect(lastJob()).toMatchObject({ status: 'needs-you', note: 'The agent is waiting for your answer' }));
     setUiLanguage('id');
-    expect(localized(lastJob().note!)).toBe('Agent menunggu jawabanmu');
+    expect(localized(lastJob().note!)).toBe('Agen menunggu jawabanmu');
   });
 
   it('still needs your answer when a system line landed after the question', async () => {

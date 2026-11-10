@@ -55,7 +55,12 @@ export function AgentBlock({ u, view }: { u: AgentUsage; view: View }) {
       <div className="flex items-center gap-2">
         <AgentLogo id={u.agentId} size={18} />
         <span className="text-[13px] font-medium">{name}</span>
-        {ok && reset && <span className="ml-auto text-xs text-text-2">{t('usage.resetsIn', { time: reset })}</span>}
+        {ok && reset && (
+          <span className="ml-auto text-xs text-text-2">
+            {/* Under a minute left: "Resets in now" reads wrong. */}
+            {reset === t('common.now') ? t('usage.resetsNow') : t('usage.resetsIn', { time: reset })}
+          </span>
+        )}
       </div>
       {ok && u.spend ? (
         <>

@@ -302,7 +302,7 @@ describe('the image strip', () => {
   it('reads in Indonesian', async () => {
     setUiLanguage('id');
     render(<MessageList messages={[user, agent(9)]} streaming={false} />);
-    expect(screen.getByRole('group', { name: 'Gambar buatan agent' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Gambar buatan agen' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '+1 lagi' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Buka gambar s1.png' }));
     expect(await screen.findByRole('button', { name: 'Gambar berikutnya' })).toBeInTheDocument();

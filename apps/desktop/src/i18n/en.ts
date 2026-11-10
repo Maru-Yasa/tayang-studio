@@ -261,6 +261,7 @@ export const en = {
     shareStats: 'Share anonymous usage stats',
     shareStatsHint: "Sends a random install ID, your system and the app version, and which features you use (a video rendered, a post made, a style copied) so we can see what to improve. Never your chats, prompts, files or videos.",
     apiOverridden: 'This copy of Tayang was started with TAYANG_API_URL, so it uses {{url}} and ignores this field. Start it without TAYANG_API_URL to use this address.',
+    advanced: 'Advanced',
     apiAddress: 'API address',
     apiHint: 'Used for built-in styles, signing in and install stats',
     apiDefault: 'Leave it empty to use {{url}}',
@@ -499,6 +500,7 @@ export const en = {
     send: 'Send',
     placeholder: 'Say what to change. Bahasa Indonesia is fine',
     notInstalled: 'Not installed',
+    notSetUp: 'Not set up',
     setUpAgents: 'Set up agents',
   },
   mention: {
@@ -755,6 +757,7 @@ export const en = {
     detailed: 'Detailed',
     compact: 'Compact',
     resetsIn: 'Resets in {{time}}',
+    resetsNow: 'Resets any moment',
     noAgents: 'No agents to show yet',
     details: 'Usage details & history',
     manage: 'Manage accounts…',

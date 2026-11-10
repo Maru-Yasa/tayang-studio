@@ -266,7 +266,7 @@ describe('a pressed schedule card', () => {
     expect(screen.queryByRole('button', { name: 'Open calendar' })).toBeNull();
     expect(useApp.getState().projectsVersion).toBe(version);
     setUiLanguage('id');
-    expect(await screen.findByText('Jadwal tidak tersimpan: video ke-2 tidak punya tanggal dan jam yang valid. Minta agent membuat kartu jadwal baru')).toBeInTheDocument();
+    expect(await screen.findByText('Jadwal tidak tersimpan: video ke-2 tidak punya tanggal dan jam yang valid. Minta agen membuat kartu jadwal baru')).toBeInTheDocument();
   });
 
   it('a raw error from Rust is never shown as it is', async () => {
