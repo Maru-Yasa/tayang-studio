@@ -233,7 +233,7 @@ describe('a build job that stopped without a video, on the Agents board', () => 
     setUiLanguage('id');
     vi.mocked(listJobs).mockResolvedValue([job({ note: 'The agent is waiting for your answer' })]);
     render(<Agents />);
-    await screen.findByText('Agent menunggu jawabanmu');
+    await screen.findByText('Agen menunggu jawabanmu');
     await userEvent.click(screen.getByRole('button', { name: 'Lanjutkan' }));
     await waitFor(() => expect(agentPrompt).toHaveBeenCalled());
     expect(useChat.getState().messages.c1!.at(-1)!.parts[0]).toEqual({

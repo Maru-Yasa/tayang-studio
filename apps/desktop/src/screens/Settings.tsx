@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AGENT_NAMES } from '@/lib/agents';
+import { AGENT_INSTALL_URL, AGENT_NAMES } from '@/lib/agents';
 import { apiClear, apiUrlOverride, detectAgents, getSettings, getSystemInfo, pickFolder, updateSettings } from '@/lib/ipc';
 
 /** What Rust says when background mode can't make its tray (and turned it back off). */
@@ -379,10 +379,20 @@ export function Settings() {
                       </div>
                     ) : a.id === 'claude' && a.installed ? (
                       <ClaudeAccountControl showSignOut />
-                    ) : (
+                    ) : a.installed ? (
                       <Button variant="ghost" className="h-8 px-2 text-[13px] text-primary hover:text-accent-hover" onClick={() => navigate({ name: 'connect' })}>
-                        {a.installed ? t('settings.reconnect') : t('settings.howToInstall')}
+                        {t('settings.reconnect')}
                       </Button>
+                    ) : (
+                      // The agent's own install guide, in the browser: the onboarding screens have none.
+                      <a
+                        href={AGENT_INSTALL_URL[a.id]}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-8 items-center px-2 text-[13px] font-medium text-primary hover:text-accent-hover"
+                      >
+                        {t('settings.howToInstall')}
+                      </a>
                     )}
                   </div>
                 ))}
@@ -611,7 +621,10 @@ export function Settings() {
                 onCheckedChange={(v) => void save({ shareInstallStats: v })}
               />
             </div>
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+            {/* For developers only: closed unless the address was changed. */}
+            <details open={settings.apiUrl !== DEFAULT_SETTINGS.apiUrl || !!apiOverride} className="group">
+              <summary className="cursor-pointer px-1 py-1 text-[13px] text-text-2 hover:text-foreground">{t('settings.advanced')}</summary>
+            <div className="mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
               <div className="mr-auto flex flex-col gap-1">
                 <label htmlFor="api-url" className="text-sm font-medium">
                   {t('settings.apiAddress')}
@@ -650,6 +663,7 @@ export function Settings() {
                 </span>
               )}
             </div>
+            </details>
           </section>
         )}
       </div>

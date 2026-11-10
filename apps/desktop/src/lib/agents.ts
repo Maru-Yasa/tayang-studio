@@ -6,10 +6,20 @@ export const AGENT_NAMES: Record<AgentId, string> = {
   opencode: 'opencode',
   gemini: 'Gemini CLI',
   codex: 'Codex',
+  antigravity: 'Antigravity CLI',
   /** Your API (the user's own provider key): the only name that is a phrase, so it follows the language. */
   get custom() {
     return i18n.t('agents.yourApi');
   },
+};
+
+/** Where each agent's own install guide is; Your API is set up inside Tayang. */
+export const AGENT_INSTALL_URL: Record<Exclude<AgentId, 'custom'>, string> = {
+  claude: 'https://docs.claude.com/en/docs/claude-code',
+  opencode: 'https://opencode.ai',
+  gemini: 'https://github.com/google-gemini/gemini-cli',
+  codex: 'https://github.com/openai/codex',
+  antigravity: 'https://antigravity.google/docs/getting-started?tab=cli',
 };
 
 /** What to type in a terminal to sign in to each agent. */
@@ -18,6 +28,7 @@ const SIGN_IN_COMMAND: Record<AgentId, string> = {
   opencode: 'opencode auth login',
   gemini: 'gemini',
   codex: 'codex',
+  antigravity: 'agy acp --login',
   custom: '',
 };
 

@@ -9,16 +9,18 @@ import { ClaudeAccountControl } from '@/components/ClaudeAccountControl';
 import { Button } from '@/components/Button';
 import { Oyen } from '@/components/Oyen';
 import { OnboardingHeader } from '@/components/OnboardingHeader';
+import { AGENT_INSTALL_URL } from '@/lib/agents';
 import { detectAgents, updateSettings } from '@/lib/ipc';
 import { useApp } from '@/state/app';
 import { useClaudeAccount } from '@/state/claudeAccount';
 import { track } from '@/lib/analytics';
 
-const ROWS: { id: AgentId; name?: string; installUrl?: string }[] = [
-  { id: 'claude', name: 'Claude Code', installUrl: 'https://docs.claude.com/en/docs/claude-code' },
-  { id: 'opencode', name: 'opencode', installUrl: 'https://opencode.ai' },
-  { id: 'gemini', name: 'Gemini CLI', installUrl: 'https://github.com/google-gemini/gemini-cli' },
-  { id: 'codex', name: 'Codex', installUrl: 'https://github.com/openai/codex' },
+const ROWS: { id: AgentId; name?: string }[] = [
+  { id: 'claude', name: 'Claude Code' },
+  { id: 'opencode', name: 'opencode' },
+  { id: 'gemini', name: 'Gemini CLI' },
+  { id: 'codex', name: 'Codex' },
+  { id: 'antigravity', name: 'Antigravity CLI' },
   { id: 'custom' },
 ];
 
@@ -110,7 +112,7 @@ export function Connect() {
                 )}
                 {r.id !== 'custom' && !installed && (
                   <a
-                    href={r.installUrl ?? '#'}
+                    href={AGENT_INSTALL_URL[r.id]}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex h-9 items-center px-1 text-sm font-medium text-primary hover:text-accent-hover"

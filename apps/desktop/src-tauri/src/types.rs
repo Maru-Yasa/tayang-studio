@@ -11,6 +11,7 @@ pub enum AgentId {
     Opencode,
     Gemini,
     Codex,
+    Antigravity,
     Custom,
 }
 

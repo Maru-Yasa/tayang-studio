@@ -17,6 +17,8 @@ vi.mock('@/lib/ipc', () => ({
   deleteAutopilot: vi.fn().mockResolvedValue(undefined),
   updateSlot: vi.fn(),
   listProjects: vi.fn(),
+  videoThumbnail: vi.fn().mockResolvedValue(null),
+  showVideoInFolder: vi.fn().mockResolvedValue(undefined),
   updateProject: vi.fn(),
   setSchedule: vi.fn(),
   setPosted: vi.fn(),
@@ -176,6 +178,15 @@ describe('Videos', () => {
     expect(screen.getAllByText('Rendered one').length).toBeGreaterThan(0);
     expect(screen.queryByText('Draft one')).not.toBeInTheDocument();
     expect(screen.queryByText('Building one')).not.toBeInTheDocument();
+  });
+
+  it('shows each video in its folder, rendered or not', async () => {
+    vi.mocked(ipc.listProjects).mockResolvedValue([project('a', 'Rendered one', 'rendered'), project('b', 'Draft one', 'draft')]);
+    render(<Videos />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Show Rendered one in its folder' }));
+    expect(ipc.showVideoInFolder).toHaveBeenCalledWith('a');
+    await userEvent.click(screen.getByRole('button', { name: 'Show Draft one in its folder' }));
+    expect(ipc.showVideoInFolder).toHaveBeenCalledWith('b');
   });
 
   it('shows the empty state', async () => {
@@ -1768,6 +1779,25 @@ describe('Settings', () => {
     render(<SettingsScreen />);
     expect(await screen.findByRole('tab', { name: 'Agents' })).toHaveAttribute('aria-selected', 'true');
     localStorage.clear();
+  });
+
+  it("How to install opens the agent's own install guide, not onboarding", async () => {
+    vi.mocked(ipc.detectAgents).mockResolvedValue([
+      { id: 'antigravity', name: 'Antigravity CLI', installed: false, version: null, acpCommand: ['agy', 'acp'], recommended: false },
+    ] as never);
+    openSettingsTab('agents');
+    render(<SettingsScreen />);
+    const link = await screen.findByRole('link', { name: 'How to install' });
+    expect(link).toHaveAttribute('href', 'https://antigravity.google/docs/getting-started?tab=cli');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('keeps the API address under Advanced, closed while it is the default', async () => {
+    openSettingsTab('account');
+    render(<SettingsScreen />);
+    const advanced = (await screen.findByText('Advanced')).closest('details')!;
+    expect(advanced).not.toHaveAttribute('open');
+    expect(within(advanced).getByLabelText('API address')).toBeInTheDocument();
   });
 
   it('background mode saves through updateSettings; open at login is disabled until it is on', async () => {

@@ -70,7 +70,7 @@ function FileChip({ part, onRemove }: { part: FilePart; onRemove(): void }) {
   );
 }
 
-const AGENT_ORDER: AgentId[] = ['claude', 'opencode', 'codex', 'gemini'];
+const AGENT_ORDER: AgentId[] = ['claude', 'opencode', 'codex', 'gemini', 'antigravity', 'custom'];
 
 /** Every toolbar control: a 32×32 icon button, same radius and hover. */
 const ICON_BUTTON =
@@ -86,11 +86,12 @@ function Tip({ label, children }: { label: string; children: React.ReactElement 
   );
 }
 
-/** The agent's logo and a small chevron; the name is in the label and tooltip. */
+/** The agent's logo, its name and a small chevron. */
 const AgentFace = ({ agent }: { agent: AgentId }) => (
   <>
     <AgentLogo id={agent} size={16} />
-    <ChevronDown size={12} strokeWidth={1.5} aria-hidden="true" />
+    <span className="max-w-28 truncate text-[12px]">{AGENT_NAMES[agent]}</span>
+    <ChevronDown size={12} strokeWidth={1.5} aria-hidden="true" className="shrink-0" />
   </>
 );
 
@@ -136,10 +137,10 @@ function AgentPicker({
           >
             <AgentLogo id={a.id} size={16} />
             <span className="font-medium">{AGENT_NAMES[a.id]}</span>
-            <span className="ml-auto font-mono text-[11px] text-text-3">
-              {a.installed ? (a.version ?? '') : t('composer.notInstalled')}
-            </span>
-            {a.id === agent && <Check data-testid="agent-check" size={14} strokeWidth={1.5} aria-hidden="true" />}
+            {!a.installed && (
+              <span className="ml-auto text-[11px] text-text-3">{a.id === 'custom' ? t('composer.notSetUp') : t('composer.notInstalled')}</span>
+            )}
+            {a.id === agent && <Check data-testid="agent-check" size={14} strokeWidth={1.5} aria-hidden="true" className="ml-auto" />}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
@@ -156,6 +157,9 @@ function AgentPicker({
 
 /** A model value's readable tail when the agent gave no name for it ("opencode/big-pickle" → "big-pickle"). */
 const shortModel = (value: string) => value.split('/').pop() ?? value;
+
+/** A model's name in the picker. Your API has one provider, so its "Provider/" prefix says nothing. */
+const modelName = (agent: AgentId, name: string) => (agent === 'custom' ? shortModel(name) : name);
 
 /**
  * The agent's model: what the chat's session runs on, or the one picked for the agent, else its
@@ -174,7 +178,8 @@ export function ModelPicker({ agent, chatId, disabled }: { agent: AgentId; chatI
   useEffect(() => useModels.getState().listen(), []);
 
   const current = live ?? picked;
-  const label = current ? (options.find((o) => o.value === current)?.name ?? shortModel(current)) : t('composer.modelDefault');
+  const found = current ? options.find((o) => o.value === current) : undefined;
+  const label = current ? (found ? modelName(agent, found.name) : shortModel(current)) : t('composer.modelDefault');
 
   const onOpenChange = (o: boolean) => {
     setOpen(o);
@@ -250,7 +255,7 @@ export function ModelPicker({ agent, chatId, disabled }: { agent: AgentId; chatI
                     onSelect={() => void choose(o.value)}
                     className="min-h-9 gap-2 text-[13px]"
                   >
-                    <span className="min-w-0 flex-1 truncate">{o.name}</span>
+                    <span className="min-w-0 flex-1 truncate">{modelName(agent, o.name)}</span>
                     {o.value === current && <Check size={14} strokeWidth={1.5} aria-hidden="true" />}
                   </CommandItem>
                 ))}
