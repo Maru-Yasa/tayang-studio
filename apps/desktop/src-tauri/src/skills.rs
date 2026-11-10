@@ -283,12 +283,22 @@ fn copy_folder(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Copying one folder into the other would never end (or copy the skills into themselves).
+fn overlaps(folder: &Path, root: &Path) -> bool {
+    let (Ok(a), Ok(b)) = (folder.canonicalize(), root.canonicalize()) else { return false };
+    a.starts_with(&b) || b.starts_with(&a)
+}
+
 /// Adds a skill from a SKILL.md file, or a folder with one (its other files come too). It starts on.
+/// A file named SKILL.md brings its folder along when that folder is small enough to be the skill's own.
 pub fn import(root: &Path, source: &Path) -> Result<Skill, String> {
     let (file, folder) = if source.is_dir() {
         (source.join("SKILL.md"), Some(source))
     } else {
-        (source.to_path_buf(), None)
+        let own = source.parent().filter(|p| {
+            source.file_name().is_some_and(|n| n == "SKILL.md") && !overlaps(p, root) && folder_size(p) <= IMPORT_LIMIT
+        });
+        (source.to_path_buf(), own)
     };
     let text = fs::read_to_string(&file).map_err(|_| "Pick a SKILL.md file, or a folder with one".to_string())?;
     let (mut head, body) = split(&text);
@@ -307,6 +317,9 @@ pub fn import(root: &Path, source: &Path) -> Result<Skill, String> {
         return Err("This SKILL.md has no instructions".into());
     }
     if let Some(f) = folder {
+        if overlaps(f, root) {
+            return Err("That folder is already part of your skills".into());
+        }
         if folder_size(f) > IMPORT_LIMIT {
             return Err("That folder is too big for a skill (over 20 MB)".into());
         }
@@ -425,6 +438,28 @@ mod tests {
         let file = t.path().join("captions.md");
         fs::write(&file, "---\ndescription: Captions\n---\nWrite captions.\n").unwrap();
         assert_eq!(import(&root, &file).unwrap().id, "captions");
+    }
+
+    #[test]
+    fn picking_a_skill_md_brings_its_folder() {
+        let (t, root) = setup();
+        let src = t.path().join("downloads/captions");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("SKILL.md"), "---\ndescription: Captions\n---\nWrite captions.\n").unwrap();
+        fs::write(src.join("styles.md"), "bold").unwrap();
+        let s = import(&root, &src.join("SKILL.md")).unwrap();
+        assert_eq!(s.id, "captions");
+        assert!(root.join("skills/captions/styles.md").is_file());
+    }
+
+    #[test]
+    fn a_skill_md_next_to_the_skills_folder_comes_alone() {
+        let (t, root) = setup();
+        let file = t.path().join("SKILL.md");
+        fs::write(&file, "---\ndescription: d\n---\nb\n").unwrap();
+        let s = import(&root, &file).unwrap();
+        assert!(!root.join("skills").join(&s.id).join("user-skills").exists());
+        assert!(import(&root, &root).is_err());
     }
 
     #[test]
