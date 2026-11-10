@@ -593,17 +593,16 @@ describe('ChatProject', () => {
     expect(screen.getByRole('button', { name: 'Auto' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('the composer toolbar is icon-only, 32px buttons with labels and tooltips', async () => {
+  it('the composer toolbar is icon-only, 32px buttons with labels and tooltips; the agent also shows its name', async () => {
     const user = userEvent.setup();
     render(<ChatRoute />);
     const agent = await screen.findByRole('button', { name: 'Agent: Claude Code' });
     const auto = screen.getByRole('button', { name: 'Auto' });
     const mention = screen.getByRole('button', { name: '@ Mention a video' });
     const attach = screen.getByRole('button', { name: 'Attach files' });
-    for (const b of [agent, auto, mention, attach]) {
-      expect(b).toHaveClass('size-8');
-      expect(b.textContent).toBe('');
-    }
+    for (const b of [agent, auto, mention, attach]) expect(b).toHaveClass('size-8');
+    for (const b of [auto, mention, attach]) expect(b.textContent).toBe('');
+    expect(agent.textContent).toBe('Claude Code');
     expect(auto).toHaveAttribute('aria-pressed', 'false');
     await user.click(auto);
     expect(auto).toHaveAttribute('aria-pressed', 'true');
@@ -1203,6 +1202,7 @@ describe('Agent picker', () => {
       info('opencode', 'opencode', true, '0.9.1'),
       info('codex', 'Codex', false, null),
       info('gemini', 'Gemini CLI', true, '0.4.0'),
+      info('custom', 'Your API', false, null),
     ] as never);
     vi.mocked(ipc.updateChatAgent).mockImplementation(async (id, agentId) => ({
       ...chat(id, id === 'c1' ? 'p1' : null),
@@ -1224,17 +1224,21 @@ describe('Agent picker', () => {
     ).toBeInTheDocument();
   });
 
-  it('lists installed agents with versions, a check on the current one, and disables the rest', async () => {
+  it('lists the agents without version numbers, a check on the current one, and disables the rest', async () => {
     const user = userEvent.setup();
     render(<ChatProject chatId="c1" />);
     await user.click(await screen.findByRole('button', { name: /Claude Code/ }));
     const current = await screen.findByRole('menuitem', { name: /Claude Code/ });
-    expect(current).toHaveTextContent('2.1.0');
+    expect(current).not.toHaveTextContent('2.1.0');
     expect(within(current).getByTestId('agent-check')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /opencode/ })).not.toHaveAttribute('data-disabled');
     const codex = screen.getByRole('menuitem', { name: /Codex/ });
     expect(codex).toHaveAttribute('data-disabled');
     expect(codex).toHaveTextContent('Not installed');
+    // Your API is listed too; before its key is saved it says so instead of "Not installed".
+    const api = screen.getByRole('menuitem', { name: /Your API/ });
+    expect(api).toHaveAttribute('data-disabled');
+    expect(api).toHaveTextContent('Not set up');
     await user.click(screen.getByRole('menuitem', { name: 'Set up agents' }));
     expect(useApp.getState().route).toEqual({ name: 'settings' });
   });
