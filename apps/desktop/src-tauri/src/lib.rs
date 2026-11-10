@@ -179,7 +179,7 @@ pub fn run() {
             commands::agent_respond_question,
             commands::media_latest_render,
             commands::latest_render_info,
-            commands::open_latest_render,
+            commands::show_video_in_folder,
             commands::newest_video_info,
             commands::video_thumbnail,
             commands::recent_images,
