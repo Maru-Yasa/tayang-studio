@@ -13,6 +13,7 @@ import { AgentLogo } from '@/components/AgentLogo';
 import { ApiSetupDialog } from '@/components/ApiSetupDialog';
 import { Button } from '@/components/Button';
 import { ToolRow, TOOL_ORDER } from '@/components/ToolRow';
+import { VoiceSourceCard } from '@/components/VoiceSourceCard';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
@@ -195,7 +196,6 @@ export function Settings() {
   const closing = useInstall((s) => s.closing);
   const refresh = useInstall((s) => s.refresh);
   const start = useInstall((s) => s.start);
-  const askKey = useInstall((s) => s.askKey);
   const agentId = settings?.defaultAgent ?? 'claude';
   const agentName = AGENT_NAMES[agentId];
 
@@ -277,8 +277,8 @@ export function Settings() {
 
   if (!settings) return null;
 
-  const install = (tool: ToolId, key?: string) => {
-    if (sys) void start(tool, { sys, agent: agentId, elevenLabsKey: key });
+  const install = (tool: ToolId) => {
+    if (sys) void start(tool, { sys, agent: agentId });
   };
   const tools = [...statuses].sort((a, b) => TOOL_ORDER.indexOf(a.id) - TOOL_ORDER.indexOf(b.id));
 
@@ -515,10 +515,6 @@ export function Settings() {
                   onChange={(v) => void save({ fps: Number(v) })}
                 />
               </Row>
-              <Row label={t('settings.voiceover')}>
-                <span className="text-xs text-text-3">{t('settings.withPlan')}</span>
-                <span className="text-sm text-[#D9D9D9]">{t('settings.off')}</span>
-              </Row>
             </Card>
           </section>
         )}
@@ -579,11 +575,12 @@ export function Settings() {
                   sys={sys}
                   agentName={agentName}
                   busy={!!active || closing || !sys}
-                  onInstall={(key) => install(t.id, key)}
-                  onAskKey={() => askKey(t.id)}
+                  onInstall={() => install(t.id)}
                 />
               ))}
             </ul>
+            <h3 className="m-0 mt-3 text-sm font-medium">{t('voice.title')}</h3>
+            <VoiceSourceCard settings={settings} onSaved={setSettings} />
           </section>
         )}
 

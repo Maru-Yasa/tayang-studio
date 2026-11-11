@@ -28,6 +28,9 @@ import type {
   Style,
   SystemInfo,
   ToolStatus,
+  VoiceCheck,
+  VoiceKeySource,
+  VoiceStatus,
   QuestionResponse,
 } from '@tayang/shared';
 
@@ -45,6 +48,15 @@ export const apiCheck = (baseUrl: string, key: string | null) => invoke<ApiCheck
 /** One real one-token call with `model` before saving; no `key` uses the saved one. */
 export const apiTry = (baseUrl: string, key: string | null, model: string) => invoke<ApiCheck>('api_try', { baseUrl, key, model });
 export const apiReachable = (baseUrl: string) => invoke<boolean>('api_reachable', { baseUrl });
+/** Which voice sources have a key saved (the keys themselves never leave Rust). */
+export const voiceStatus = () => invoke<VoiceStatus>('voice_status');
+/** Checks the source's API key (null: the saved one); a good one is saved and that source becomes the voice source. */
+export const voiceKeySave = (source: VoiceKeySource, key: string | null) =>
+  invoke<[VoiceCheck, Settings]>('voice_key_save', { source, key });
+/** Forgets the source's API key; the voice source goes back to Tayang when it was that source. */
+export const voiceKeyClear = (source: VoiceKeySource) => invoke<Settings>('voice_key_clear', { source });
+/** Whether VoiceStudio is open on this computer. */
+export const voiceStudioCheck = () => invoke<VoiceCheck>('voice_studio_check');
 /** Saves the provider (and the key, when given) and makes Your API the default agent. */
 export const apiSave = (provider: ApiProvider, key: string | null) => invoke<Settings>('api_save', { provider, key });
 export const apiClear = () => invoke<Settings>('api_clear');
@@ -57,7 +69,7 @@ export interface EngineProgress {
 }
 export const getSystemInfo = () => invoke<SystemInfo>('get_system_info');
 export const detectAgents = () => invoke<AgentInfo[]>('detect_agents');
-export const checkTools = (agent: AgentId) => invoke<ToolStatus[]>('check_tools', { agent });
+export const checkTools = () => invoke<ToolStatus[]>('check_tools');
 export const getSettings = () => invoke<Settings>('get_settings');
 /** TAYANG_API_URL when the app was started with it: it wins over the API address in Settings. */
 export const apiUrlOverride = () => invoke<string | null>('api_url_override');

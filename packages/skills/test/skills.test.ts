@@ -54,7 +54,6 @@ describe('install', () => {
     expect(installCommands('ytdlp', bare, 'claude')).toContain(
       'curl -L -o ~/.local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos',
     );
-    expect(installCommands('elevenlabs-mcp', bare, 'claude')[0]).toBe('curl -LsSf https://astral.sh/uv/install.sh | sh');
   });
   it('linux sudo installs are handed to the user', () => {
     expect(needsSudo('chrome', apt)).toBe(true);
@@ -81,20 +80,6 @@ describe('install', () => {
     expect(manualInstallUrl('chrome', mac)).toBeNull();
     expect(manualInstallUrl('chrome', apt)).toBeNull();
     expect(manualInstallUrl('ffmpeg', bare)).toBeNull();
-  });
-  it('elevenlabs', () => {
-    expect(installCommands('elevenlabs-mcp', mac, 'claude')).toEqual([
-      'brew install uv',
-      'claude mcp add -s user elevenlabs -e ELEVENLABS_API_KEY=sk_•••• -- uvx elevenlabs-mcp',
-    ]);
-    const p = buildInstallPrompt('elevenlabs-mcp', mac, 'claude', { elevenLabsKey: 'sk_real' });
-    expect(p).toContain('ELEVENLABS_API_KEY=sk_real');
-    // User scope, so the server works in every project folder, not just the setup folder.
-    expect(p).toContain('claude mcp add -s user elevenlabs');
-    const o = buildInstallPrompt('elevenlabs-mcp', mac, 'codex', { elevenLabsKey: 'sk_real' });
-    expect(o).toContain('uvx elevenlabs-mcp');
-    expect(o).toContain('sk_real');
-    expect(o).toContain('user-level');
   });
 });
 

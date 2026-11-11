@@ -18,7 +18,7 @@ export interface SystemInfo {
   packageManager: PackageManager | null;
 }
 
-export type ToolId = 'node' | 'ffmpeg' | 'chrome' | 'ytdlp' | 'elevenlabs-mcp';
+export type ToolId = 'node' | 'ffmpeg' | 'chrome' | 'ytdlp';
 
 export interface ToolStatus {
   id: ToolId;
@@ -280,6 +280,32 @@ export interface Settings {
   agentModels: Partial<Record<AgentId, string>>;
   /** "Your API" (the `custom` agent): provider preset, address and model. The key stays in the keychain. */
   apiProvider?: ApiProvider | null;
+  /** Where voice-overs come from; missing: Tayang credits. API keys stay in the keychain. */
+  voiceSource?: VoiceSource;
+}
+
+/** Tayang credits, the user's own ElevenLabs or Fish Audio key, or VoiceStudio running on this computer. */
+export type VoiceSource = 'tayang' | 'elevenlabs' | 'fishaudio' | 'voicestudio';
+
+/** The voice sources that speak with the user's own API key. */
+export type VoiceKeySource = 'elevenlabs' | 'fishaudio';
+
+/** Why the user's own voice can't speak (the desktop's `VoiceError` codes). */
+export type VoiceErrorCode = 'no-key' | 'bad-key' | 'no-balance' | 'not-running' | 'too-long' | 'busy' | 'failed';
+
+/**
+ * The answer of trying a voice source. `hasCredit`: the account has credit left (null when the key
+ * can't read it); Fish Audio without credit speaks with its free model.
+ */
+export interface VoiceCheck {
+  ok: boolean;
+  error: VoiceErrorCode | null;
+  hasCredit: boolean | null;
+}
+
+export interface VoiceStatus {
+  hasElevenKey: boolean;
+  hasFishKey: boolean;
 }
 
 /** A provider preset: `other` is any OpenAI-compatible address the user types. */

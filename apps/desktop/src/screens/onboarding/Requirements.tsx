@@ -25,7 +25,6 @@ export function Requirements() {
   const closing = useInstall((s) => s.closing);
   const refresh = useInstall((s) => s.refresh);
   const start = useInstall((s) => s.start);
-  const askKey = useInstall((s) => s.askKey);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -55,9 +54,9 @@ export function Requirements() {
   const missing = requiredMissing(statuses);
   const blocked = !loaded || missing.length > 0;
 
-  const install = (tool: ToolId, key?: string) => {
+  const install = (tool: ToolId) => {
     if (!sys) return;
-    void start(tool, { sys, agent: agentId, elevenLabsKey: key });
+    void start(tool, { sys, agent: agentId });
   };
 
   // The tools are ready: last comes the optional Tayang sign-in, which finishes onboarding.
@@ -76,8 +75,7 @@ export function Requirements() {
             sys={sys}
             agentName={agentName}
             busy={!!active || closing || !sys}
-            onInstall={(key) => install(t.id, key)}
-            onAskKey={() => askKey(t.id)}
+            onInstall={() => install(t.id)}
           />
         ))}
       </ul>

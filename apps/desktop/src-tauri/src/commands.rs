@@ -79,11 +79,14 @@ pub async fn detect_agents(app: AppHandle) -> CmdResult<Vec<AgentInfo>> {
 }
 
 #[tauri::command]
-pub async fn check_tools(app: AppHandle, agent: AgentId) -> CmdResult<Vec<ToolStatus>> {
-    let claude = claude_config_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || system::check_tools(&RealExec, agent, &claude))
-        .await
-        .map_err(err)
+pub async fn check_tools() -> CmdResult<Vec<ToolStatus>> {
+    tauri::async_runtime::spawn_blocking(|| {
+        // The user may have just installed a tool in their terminal: read their shell's PATH again.
+        system::refresh_shell_path();
+        system::check_tools(&RealExec)
+    })
+    .await
+    .map_err(err)
 }
 
 #[tauri::command]
@@ -1029,7 +1032,29 @@ pub async fn start_ai_proxy(handle: AppHandle) {
             };
             let auth = auth.inner().clone();
             let base = api_base(&state);
-            let Some(token) = auth.token(&base).await else {
+            let token = auth.token(&base).await;
+            // The user's own voice (Settings › Video) speaks instead of Tayang's, signed in or not.
+            let settings = state.db.get_settings(&state.home);
+            let own_voice = settings.voice_source != crate::types::VoiceSource::Tayang;
+            if own_voice {
+                if let crate::ai_proxy::AiJob::Voice { text, language, out, .. } = &job {
+                    let source = settings.voice_source;
+                    let key = match (source.key_account(), handle.try_state::<ApiKeys>()) {
+                        (Some(account), Some(keys)) => keys.get_account(account).await.ok().flatten(),
+                        _ => None,
+                    };
+                    let setup = crate::voice::VoiceSetup { source, key, base: source.base().into() };
+                    return crate::voice::speak(auth.client(), &setup, text, language.as_deref(), out, &folder).await;
+                }
+                if job == crate::ai_proxy::AiJob::Usage {
+                    let usage = match &token {
+                        Some(t) => crate::ai_proxy::run_job(auth.client(), &base, t, job, &folder).await.ok(),
+                        None => None,
+                    };
+                    return Ok(crate::voice::usage_with_own_voice(usage, settings.voice_source));
+                }
+            }
+            let Some(token) = token else {
                 return Err((401, serde_json::json!({ "error": "signed-out", "message": "The user isn't signed in to Tayang: make this without AI images or voice" })));
             };
             crate::ai_proxy::run_job(auth.client(), &base, &token, job, &folder).await
@@ -2180,29 +2205,105 @@ impl ApiKeys {
     }
 
     /// The keychain can block or ask, so it runs off the async threads.
-    async fn get(&self) -> CmdResult<Option<String>> {
+    async fn get_account(&self, account: &'static str) -> CmdResult<Option<String>> {
         let store = self.0.clone();
-        tauri::async_runtime::spawn_blocking(move || store.get(crate::api_engine::KEY_ACCOUNT))
-            .await
-            .map_err(err)?
-            .map_err(err)
+        tauri::async_runtime::spawn_blocking(move || store.get(account)).await.map_err(err)?.map_err(err)
+    }
+
+    async fn set_account(&self, account: &'static str, key: String) -> CmdResult<()> {
+        let store = self.0.clone();
+        tauri::async_runtime::spawn_blocking(move || store.set(account, &key)).await.map_err(err)?.map_err(err)
+    }
+
+    async fn delete_account(&self, account: &'static str) -> CmdResult<()> {
+        let store = self.0.clone();
+        tauri::async_runtime::spawn_blocking(move || store.delete(account)).await.map_err(err)?.map_err(err)
+    }
+
+    async fn get(&self) -> CmdResult<Option<String>> {
+        self.get_account(crate::api_engine::KEY_ACCOUNT).await
     }
 
     async fn set(&self, key: String) -> CmdResult<()> {
-        let store = self.0.clone();
-        tauri::async_runtime::spawn_blocking(move || store.set(crate::api_engine::KEY_ACCOUNT, &key))
-            .await
-            .map_err(err)?
-            .map_err(err)
+        self.set_account(crate::api_engine::KEY_ACCOUNT, key).await
     }
 
     async fn delete(&self) -> CmdResult<()> {
-        let store = self.0.clone();
-        tauri::async_runtime::spawn_blocking(move || store.delete(crate::api_engine::KEY_ACCOUNT))
-            .await
-            .map_err(err)?
-            .map_err(err)
+        self.delete_account(crate::api_engine::KEY_ACCOUNT).await
     }
+}
+
+// ---- the user's own voice (Fish Audio or VoiceStudio, see voice) ----
+
+/// What Settings › Video shows about the voice sources: which keys are saved.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceStatus {
+    has_eleven_key: bool,
+    has_fish_key: bool,
+}
+
+/// The keychain account of a source that has an API key, and its name in Settings.
+fn voice_key_source(source: crate::types::VoiceSource) -> CmdResult<(&'static str, &'static str)> {
+    let account = source.key_account().ok_or("That voice source has no API key")?;
+    Ok((account, if source == crate::types::VoiceSource::Elevenlabs { "elevenlabs" } else { "fishaudio" }))
+}
+
+#[tauri::command]
+pub async fn voice_status(keys: State<'_, ApiKeys>) -> CmdResult<VoiceStatus> {
+    let mut saved = [false, false];
+    for (i, source) in [crate::types::VoiceSource::Elevenlabs, crate::types::VoiceSource::Fishaudio].into_iter().enumerate() {
+        if let Some(account) = source.key_account() {
+            saved[i] = keys.get_account(account).await.ok().flatten().is_some_and(|k| !k.is_empty());
+        }
+    }
+    Ok(VoiceStatus { has_eleven_key: saved[0], has_fish_key: saved[1] })
+}
+
+/// Checks the source's API key (no `key`: the saved one) and, when it is good, saves it and makes
+/// that source the voice source. A refused key changes nothing.
+#[tauri::command]
+pub async fn voice_key_save(
+    state: State<'_, AppState>,
+    keys: State<'_, ApiKeys>,
+    source: crate::types::VoiceSource,
+    key: Option<String>,
+) -> CmdResult<(crate::voice::VoiceCheck, Settings)> {
+    let (account, name) = voice_key_source(source)?;
+    let typed = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+    let key = match &typed {
+        Some(k) => k.clone(),
+        None => keys.get_account(account).await?.unwrap_or_default(),
+    };
+    let client = api_client(std::time::Duration::from_secs(20))?;
+    let check = crate::voice::key_check(&client, source, source.base(), &key).await;
+    if !check.ok {
+        return Ok((check, state.db.get_settings(&state.home)));
+    }
+    if let Some(k) = typed {
+        keys.set_account(account, k).await?;
+    }
+    let settings = state.db.update_settings(serde_json::json!({ "voiceSource": name })).map_err(err)?;
+    Ok((check, settings))
+}
+
+/// Forgets the source's API key; the voice source goes back to Tayang when it was that source.
+#[tauri::command]
+pub async fn voice_key_clear(state: State<'_, AppState>, keys: State<'_, ApiKeys>, source: crate::types::VoiceSource) -> CmdResult<Settings> {
+    let (account, _) = voice_key_source(source)?;
+    keys.delete_account(account).await?;
+    let settings = state.db.get_settings(&state.home);
+    if settings.voice_source != source {
+        return Ok(settings);
+    }
+    state.db.update_settings(serde_json::json!({ "voiceSource": "tayang" })).map_err(err)
+}
+
+/// Whether VoiceStudio is open on this computer.
+#[tauri::command]
+pub async fn voice_studio_check() -> CmdResult<crate::voice::VoiceCheck> {
+    let client = api_client(std::time::Duration::from_secs(5))?;
+    Ok(crate::voice::voicestudio_check(&client, crate::voice::VOICESTUDIO_BASE).await)
 }
 
 /// One engine download at a time.
