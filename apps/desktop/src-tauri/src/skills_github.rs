@@ -329,6 +329,21 @@ mod tests {
 
 #[cfg(test)]
 mod real_download {
+    /// `cargo test --lib downloads_a_real_link -- --ignored --nocapture` (needs the internet).
+    #[tokio::test]
+    #[ignore]
+    async fn downloads_a_real_link() {
+        let link = super::parse_link("https://github.com/anthropics/skills/tree/main/skills/pdf").unwrap();
+        let bytes = reqwest::get(link.archive_url()).await.unwrap().bytes().await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        super::unpack(&bytes, dir.path()).unwrap();
+        let found = super::find_skills(dir.path(), &link.path).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "pdf");
+        assert!(found[0].script_count > 0);
+        println!("{} MB, {:?}", bytes.len() / 1_000_000, found[0]);
+    }
+
     /// `SKILLS_ZIP=<a GitHub repo zip> cargo test --lib real_repo_zip -- --ignored --nocapture`
     #[test]
     #[ignore]
