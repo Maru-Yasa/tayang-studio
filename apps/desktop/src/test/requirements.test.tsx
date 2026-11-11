@@ -212,6 +212,21 @@ describe('Requirements', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
+  it('a turn that ends without the tool shows a short error, with the agent reply folded away', async () => {
+    const user = userEvent.setup();
+    render(<Requirements />);
+    await user.click(await screen.findByRole('button', { name: 'Install FFmpeg' }));
+    await waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    await emitUpdate({ kind: 'text', text: 'Let me check the metadata in the uv cache. 0.12.2' });
+    await emitUpdate({ kind: 'done', stopReason: 'end_turn' });
+    const alert = await screen.findByText('Tayang still can’t find it on this computer. Try again.');
+    expect(alert).toHaveTextContent('Tayang still can’t find it on this computer. Try again.');
+    expect(alert).not.toHaveTextContent('uv cache');
+    const details = screen.getByText('What Claude Code said').closest('details')!;
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent('Let me check the metadata in the uv cache. 0.12.2');
+  });
+
   it('disables other installs while one runs', async () => {
     const user = userEvent.setup();
     render(<Requirements />);

@@ -144,6 +144,15 @@ export function ToolRow({ tool, sys, agentName, busy, onInstall, onAskKey }: {
         <p role="alert" className="m-0 text-[13px] text-orange-light">{inst.error}</p>
       )}
 
+      {status === 'failed' && inst?.reply?.trim() && (
+        <details className="text-[13px] text-text-3">
+          <summary className="cursor-pointer select-none hover:text-text-2">{t('tools.agentSaid', { agent: agentName })}</summary>
+          <p className="m-0 mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-sidebar p-3 text-text-2">
+            {inst.reply.trim()}
+          </p>
+        </details>
+      )}
+
       {status === 'key' && (
         <div className="flex flex-col gap-2 rounded-md border border-border bg-ink p-3">
           <label htmlFor="elkey" className="text-[13px] text-[#D9D9D9]">

@@ -193,6 +193,7 @@ export const en = {
     addTo: 'Add to {{agent}}',
     install: 'Install',
     update: 'Update',
+    agentSaid: 'What {{agent}} said',
     found: 'Found',
     added: 'Added',
     installing: 'Installing',

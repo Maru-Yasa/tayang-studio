@@ -195,6 +195,7 @@ export const id: Translations = {
     addTo: 'Tambah ke {{agent}}',
     install: 'Pasang',
     update: 'Perbarui',
+    agentSaid: 'Kata {{agent}}',
     found: 'Ditemukan',
     added: 'Ditambahkan',
     installing: 'Memasang',
