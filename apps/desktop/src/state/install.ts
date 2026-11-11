@@ -117,8 +117,8 @@ export const useInstall = create<InstallState>((set, get) => {
           patch(tool, { status: 'done', error: undefined });
           set({ active: null });
         } else {
-          const reply = get().tools[tool]?.reply?.trim();
-          fail(tool, reply ? reply.slice(-400) : i18n.t('errors.cantFindTool'));
+          // The agent's own reply can be a long monologue; the row shows it folded away, under this line.
+          fail(tool, i18n.t('errors.cantFindTool'));
         }
       } catch (e) {
         fail(tool, e instanceof Error ? e.message : String(e));

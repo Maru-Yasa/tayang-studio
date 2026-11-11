@@ -64,6 +64,8 @@ export function ToolRow({ tool, sys, agentName, busy, onInstall }: {
   // Node, and Chrome on a Mac without Homebrew: the user installs it from the download page.
   const manualUrl = manualInstallUrl(tool.id, sys);
   const status = inst?.status ?? 'missing';
+  // Installed, but older than Tayang needs: say so, or "Install" reads as if nothing was found.
+  const tooOld = tool.id === 'node' && tool.found && !tool.ok && !!tool.version;
   const ok = tool.ok || status === 'done';
   const showMissing = !ok && (status === 'missing' || status === 'failed');
   const detail = ok
@@ -71,11 +73,12 @@ export function ToolRow({ tool, sys, agentName, busy, onInstall }: {
       ? t('tools.installedBy', { agent: agentName })
       : detailText
     : (manualUrl && tool.id === 'chrome' && t('tools.chrome.missingManual')) ||
+      (tooOld && t('tools.node.tooOld', { version: tool.version ?? '' })) ||
       (tool.id === 'node' && t('tools.node.missing')) ||
       (tool.id === 'ffmpeg' && t('tools.ffmpeg.missing')) ||
       (tool.id === 'ytdlp' && t('tools.ytdlp.missing')) ||
       detailText;
-  const label = t('tools.install');
+  const label = tooOld ? t('tools.update') : t('tools.install');
   const expected = sys ? installCommands(tool.id, sys, agent) : [];
 
   return (
@@ -122,6 +125,15 @@ export function ToolRow({ tool, sys, agentName, busy, onInstall }: {
 
       {status === 'failed' && inst?.error && (
         <p role="alert" className="m-0 text-[13px] text-orange-light">{inst.error}</p>
+      )}
+
+      {status === 'failed' && inst?.reply?.trim() && (
+        <details className="text-[13px] text-text-3">
+          <summary className="cursor-pointer select-none hover:text-text-2">{t('tools.agentSaid', { agent: agentName })}</summary>
+          <p className="m-0 mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-sidebar p-3 text-text-2">
+            {inst.reply.trim()}
+          </p>
+        </details>
       )}
 
       {request && active === tool.id && (

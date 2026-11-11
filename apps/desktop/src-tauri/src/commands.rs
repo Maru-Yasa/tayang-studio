@@ -80,7 +80,13 @@ pub async fn detect_agents(app: AppHandle) -> CmdResult<Vec<AgentInfo>> {
 
 #[tauri::command]
 pub async fn check_tools() -> CmdResult<Vec<ToolStatus>> {
-    tauri::async_runtime::spawn_blocking(|| system::check_tools(&RealExec)).await.map_err(err)
+    tauri::async_runtime::spawn_blocking(|| {
+        // The user may have just installed a tool in their terminal: read their shell's PATH again.
+        system::refresh_shell_path();
+        system::check_tools(&RealExec)
+    })
+    .await
+    .map_err(err)
 }
 
 #[tauri::command]
