@@ -14,6 +14,8 @@ const PLUGIN_JSON: &str = r#"{"name":"my-skills","description":"Your own skills,
 const IMPORT_LIMIT: u64 = 20 * 1024 * 1024;
 /// Claude Code's limit for a skill name.
 const NAME_LIMIT: usize = 64;
+/// In a skill's folder: the link it was added from, for skills added from GitHub.
+const SOURCE_FILE: &str = ".tayang-source";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +26,8 @@ pub struct Skill {
     pub enabled: bool,
     /// The SKILL.md on disk.
     pub path: String,
+    /// The link it was added from (GitHub), when it came from one.
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -125,6 +129,13 @@ fn set_field(head: &mut Vec<String>, key: &str, value: &str) {
     }
 }
 
+/// A SKILL.md's `name` and `description`, when it has them.
+pub fn name_and_description(text: &str) -> (Option<String>, Option<String>) {
+    let (head, _) = split(text);
+    let get = |k| field(&head, k).filter(|v| !v.trim().is_empty());
+    (get("name"), get("description"))
+}
+
 fn compose(head: &[String], body: &str) -> String {
     format!("---\n{}\n---\n\n{}\n", head.join("\n"), body.trim())
 }
@@ -139,6 +150,7 @@ fn read_skill(dir: &Path, enabled: bool) -> Option<Skill> {
         id,
         enabled,
         path: file.to_string_lossy().into_owned(),
+        source: fs::read_to_string(dir.join(SOURCE_FILE)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
     })
 }
 
@@ -335,6 +347,14 @@ pub fn import(root: &Path, source: &Path) -> Result<Skill, String> {
     read_skill(&dir, true).ok_or_else(|| "Couldn't add the skill".into())
 }
 
+/// Imports a skill's folder and keeps the link it came from (`origin`) with it.
+pub fn import_from(root: &Path, folder: &Path, origin: &str) -> Result<Skill, String> {
+    let skill = import(root, folder)?;
+    let dir = Path::new(&skill.path).parent().ok_or("Couldn't add the skill")?;
+    fs::write(dir.join(SOURCE_FILE), origin).map_err(io)?;
+    read_skill(dir, true).ok_or_else(|| "Couldn't add the skill".into())
+}
+
 /// The plugin folder for Claude, when at least one skill is on.
 pub fn plugin(root: &Path) -> Option<PathBuf> {
     list(root).iter().any(|s| s.enabled).then(|| root.to_path_buf())
@@ -343,6 +363,23 @@ pub fn plugin(root: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_skill_from_a_link_keeps_where_it_came_from() {
+        let data = tempfile::tempdir().unwrap();
+        let root = root(data.path()).unwrap();
+        let src = data.path().join("download/pdf");
+        fs::create_dir_all(src.join("scripts")).unwrap();
+        fs::write(src.join("SKILL.md"), "---\nname: pdf\ndescription: Use for PDFs\n---\nRun it.\n").unwrap();
+        fs::write(src.join("scripts/fill.py"), "print(1)").unwrap();
+        let s = import_from(&root, &src, "https://github.com/a/b/tree/HEAD/pdf").unwrap();
+        assert_eq!(s.source.as_deref(), Some("https://github.com/a/b/tree/HEAD/pdf"));
+        assert!(root.join("skills/pdf/scripts/fill.py").is_file());
+        let off = set_enabled(&root, "pdf", false).unwrap();
+        assert_eq!(off.source.as_deref(), Some("https://github.com/a/b/tree/HEAD/pdf"), "turning it off keeps the source");
+        assert_eq!(list(&root)[0].source.as_deref(), Some("https://github.com/a/b/tree/HEAD/pdf"));
+        assert_eq!(name_and_description("---\nname: x\ndescription: \"\"\n---\nb"), (Some("x".into()), None));
+    }
 
     fn setup() -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
