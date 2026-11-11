@@ -34,7 +34,7 @@ irm https://studio.tayang.app/install.ps1 | iex
 Both install the latest release and open it. Installed copies update themselves.
 
 - **macOS:** the app goes into /Applications (or ~/Applications if /Applications isn't writable).
-- **Linux (x86_64):** the `.deb` with apt, the `.rpm` with dnf, yum or zypper, or the AppImage in ~/.local/share/tayang-studio when there is no sudo. The AppImage needs FUSE 2.
+- **Linux (x86_64 and ARM64):** the `.deb` with apt, the `.rpm` with dnf, yum or zypper, or the AppImage in ~/.local/share/tayang-studio when there is no sudo. The AppImage needs FUSE 2.
 - **Windows:** installs for your user only, so no admin is needed.
 
 Options: `TAYANG_VERSION=0.0.2` installs that version. `TAYANG_INSTALL_DIR` sets the macOS folder. `TAYANG_LINUX_PACKAGE=deb|rpm|appimage` picks the Linux package. `TAYANG_NO_LAUNCH=1` skips opening the app. Or download an installer from [Releases](https://github.com/Maru-Yasa/tayang-studio/releases).

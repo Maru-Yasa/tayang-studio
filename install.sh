@@ -126,11 +126,16 @@ linux_package() {
 }
 
 install_linux() {
-  [ "$(uname -m)" = x86_64 ] || fail "Tayang for Linux is built for x86_64 only, not $(uname -m)"
+  # Release file names: .deb says amd64/arm64, .rpm and .AppImage say x86_64/aarch64 (amd64 for x86_64 AppImages).
+  case "$(uname -m)" in
+    x86_64 | amd64) deb_arch=amd64 rpm_arch=x86_64 appimage_arch=amd64 ;;
+    aarch64 | arm64) deb_arch=arm64 rpm_arch=aarch64 appimage_arch=aarch64 ;;
+    *) fail "Tayang for Linux is built for x86_64 and ARM64 (aarch64) only, not $(uname -m)" ;;
+  esac
   kind=$(linux_package)
   case "$kind" in
     deb)
-      file="${ASSET}_${VERSION}_amd64.deb"
+      file="${ASSET}_${VERSION}_${deb_arch}.deb"
       say "Downloading $APP $VERSION (.deb)..."
       download "$BASE/download/v$VERSION/$file" "$TMP/$file"
       chmod 644 "$TMP/$file"
@@ -141,7 +146,7 @@ install_linux() {
       bin=tayang-studio
       ;;
     rpm)
-      file="${ASSET}-${VERSION}-1.x86_64.rpm"
+      file="${ASSET}-${VERSION}-1.${rpm_arch}.rpm"
       say "Downloading $APP $VERSION (.rpm)..."
       download "$BASE/download/v$VERSION/$file" "$TMP/$file"
       say "Installing (this may ask for your password)..."
@@ -155,7 +160,7 @@ install_linux() {
       bin=tayang-studio
       ;;
     appimage)
-      file="${ASSET}_${VERSION}_amd64.AppImage"
+      file="${ASSET}_${VERSION}_${appimage_arch}.AppImage"
       say "Downloading $APP $VERSION (AppImage)..."
       download "$BASE/download/v$VERSION/$file" "$TMP/$file"
       data="${XDG_DATA_HOME:-$HOME/.local/share}"
