@@ -13,6 +13,7 @@ pub mod media;
 pub mod projects;
 pub mod scheduler;
 pub mod skills;
+pub mod skills_github;
 pub mod styles_sync;
 pub mod system;
 pub mod telemetry;
@@ -108,6 +109,9 @@ pub fn run() {
             commands::skill_set_enabled,
             commands::skill_delete,
             commands::skill_import,
+            commands::skill_github_fetch,
+            commands::skill_github_install,
+            commands::skill_github_discard,
             commands::api_status,
             commands::api_check,
             commands::api_try,

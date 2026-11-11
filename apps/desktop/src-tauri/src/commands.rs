@@ -1266,6 +1266,102 @@ pub fn skill_import(app: AppHandle, path: String) -> CmdResult<crate::skills::Sk
     crate::skills::import(&skills_root(&app)?, Path::new(&path))
 }
 
+/// Skills found at a GitHub link, waiting in a download for the user to choose.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDownload {
+    id: String,
+    skills: Vec<crate::skills_github::FoundSkill>,
+}
+
+/// Downloads the repo at a GitHub link and lists the skills in it. Only one download is kept.
+#[tauri::command]
+pub async fn skill_github_fetch(app: AppHandle, url: String) -> CmdResult<SkillDownload> {
+    use crate::skills_github as gh;
+    let link = gh::parse_link(&url)?;
+    let data = app.path().app_data_dir().map_err(err)?;
+    let _ = std::fs::remove_dir_all(data.join("skill-downloads"));
+    let client = api_client(std::time::Duration::from_secs(90))?;
+    let mut resp = client.get(link.archive_url()).send().await.map_err(|_| "Couldn't reach GitHub. Are you online?".to_string())?;
+    match resp.status().as_u16() {
+        200..=299 => {}
+        404 => return Err("Nothing at that link. Check it, and note that private repos can't be added".into()),
+        code => return Err(format!("GitHub didn't send the repo (error {code}). Try again in a minute")),
+    }
+    let too_big = || format!("That repo is over {} MB, too big to add skills from", gh::DOWNLOAD_LIMIT / 1024 / 1024);
+    if resp.content_length().is_some_and(|n| n > gh::DOWNLOAD_LIMIT) {
+        return Err(too_big());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|_| "The download stopped. Try again".to_string())? {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() as u64 > gh::DOWNLOAD_LIMIT {
+            return Err(too_big());
+        }
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let dir = gh::download_dir(&data, &id)?;
+    let found = tokio::task::spawn_blocking(move || {
+        let result = gh::unpack(&bytes, &dir).and_then(|_| gh::find_skills(&dir, &link.path));
+        match result {
+            Ok(skills) => Ok(skills.into_iter().map(|s| gh::FoundSkill { source: link.folder_url(&s.folder), ..s }).collect()),
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                Err(e)
+            }
+        }
+    })
+    .await
+    .map_err(err)??;
+    Ok(SkillDownload { id, skills: found })
+}
+
+/// One skill the user chose from a download.
+#[derive(serde::Deserialize)]
+pub struct SkillPick {
+    folder: String,
+    source: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillInstall {
+    added: Vec<crate::skills::Skill>,
+    /// "folder: why" for each that couldn't be added.
+    failed: Vec<String>,
+}
+
+/// Adds the chosen skills from a download (each with its files), then removes the download.
+#[tauri::command]
+pub fn skill_github_install(app: AppHandle, id: String, picks: Vec<SkillPick>) -> CmdResult<SkillInstall> {
+    let dir = crate::skills_github::download_dir(&app.path().app_data_dir().map_err(err)?, &id)?;
+    if !dir.is_dir() {
+        return Err("That download is gone. Paste the link again".into());
+    }
+    let root = skills_root(&app)?;
+    let base = dir.canonicalize().map_err(err)?;
+    let (mut added, mut failed) = (Vec::new(), Vec::new());
+    for p in picks {
+        let folder = dir.join(&p.folder);
+        let inside = folder.canonicalize().is_ok_and(|f| f.starts_with(&base));
+        let result = if inside { crate::skills::import_from(&root, &folder, &p.source) } else { Err("not in the download".into()) };
+        match result {
+            Ok(s) => added.push(s),
+            Err(e) => failed.push(format!("{}: {e}", if p.folder.is_empty() { "SKILL.md" } else { &p.folder })),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(SkillInstall { added, failed })
+}
+
+/// Throws away a download the user closed without adding anything.
+#[tauri::command]
+pub fn skill_github_discard(app: AppHandle, id: String) -> CmdResult<()> {
+    let dir = crate::skills_github::download_dir(&app.path().app_data_dir().map_err(err)?, &id)?;
+    let _ = std::fs::remove_dir_all(dir);
+    Ok(())
+}
+
 /// Tayang's own Claude Code config folder (see `claude_account`), created on first use.
 pub fn claude_config_dir(app: &AppHandle) -> CmdResult<PathBuf> {
     let dir = crate::claude_account::config_dir(&app.path().app_data_dir().map_err(err)?);
