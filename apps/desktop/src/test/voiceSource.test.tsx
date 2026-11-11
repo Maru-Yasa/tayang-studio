@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Settings } from '@tayang/shared';
+import type { Settings, VoiceSource } from '@tayang/shared';
 
 vi.mock('@/lib/ipc', () => ({
   updateSettings: vi.fn(),
@@ -14,8 +14,14 @@ vi.mock('@/lib/ipc', () => ({
 import * as ipc from '@/lib/ipc';
 import { VoiceSourceCard } from '@/components/VoiceSourceCard';
 
-const base = { voiceSource: 'tayang', fishVoiceId: null } as Settings;
-const withSource = (voiceSource: Settings['voiceSource'], fishVoiceId: string | null = null) => ({ ...base, voiceSource, fishVoiceId }) as Settings;
+const base = { voiceSource: 'tayang' } as Settings;
+const withSource = (voiceSource: VoiceSource) => ({ ...base, voiceSource }) as Settings;
+
+/** Opens the source menu and picks one. */
+const pick = async (user: UserEvent, name: string) => {
+  await user.click(screen.getByRole('button', { name: /^Voice source/ }));
+  await user.click(await screen.findByRole('menuitem', { name: new RegExp(`^${name}`) }));
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -24,40 +30,52 @@ beforeEach(() => {
 });
 
 describe('VoiceSourceCard', () => {
-  it('starts on Tayang credits', () => {
+  it('shows the source in use on the button, and marks it in the menu', async () => {
     render(<VoiceSourceCard settings={base} onSaved={() => {}} />);
-    expect(screen.getByRole('tab', { name: 'Tayang' }).getAttribute('aria-selected')).toBe('true');
+    const user = userEvent.setup();
+    expect(screen.getByRole('button', { name: 'Voice source: Tayang' })).toBeTruthy();
     expect(screen.getByText('Voiceovers are made with your Tayang credits, about 7 credits a minute.')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Voice source: Tayang' }));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.map((i) => i.textContent)).toEqual(['Tayang', 'ElevenLabsNeeds an API key', 'Fish AudioNeeds an API key', 'VoiceStudio']);
+    // Only the one in use carries the check.
+    expect(within(items[0]!).getByTestId('voice-check')).toBeTruthy();
+    expect(screen.getAllByTestId('voice-check')).toHaveLength(1);
   });
 
-  it('Fish Audio becomes the source only once a key is checked and saved', async () => {
-    vi.mocked(ipc.voiceKeySave).mockResolvedValue([{ ok: true, error: null, hasCredit: true }, withSource('fishaudio', 'voice-9')]);
+  it('Fish Audio is in use only once a key is checked and saved', async () => {
+    vi.mocked(ipc.voiceKeySave).mockResolvedValue([{ ok: true, error: null, hasCredit: true }, withSource('fishaudio')]);
     const onSaved = vi.fn();
-    render(<VoiceSourceCard settings={base} onSaved={onSaved} />);
+    const { rerender } = render(<VoiceSourceCard settings={base} onSaved={onSaved} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('tab', { name: 'Fish Audio' }));
-    // Opening the panel changes nothing yet: there is no key.
+    await pick(user, 'Fish Audio');
+    // Picking it opens its key step; the button still says what is in use.
     expect(ipc.updateSettings).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Voice source: Tayang' })).toBeTruthy();
     expect(screen.getByText('Not on yet. Save an API key first')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Check and use' })).toHaveProperty('disabled', true);
+    // No voice to pick: the default voice speaks.
+    expect(screen.queryByLabelText(/Voice ID/)).toBeNull();
 
     await user.type(screen.getByLabelText(/Fish Audio API key/), ' fk-123 ');
-    await user.type(screen.getByLabelText('Voice ID (optional)'), 'voice-9');
     await user.click(screen.getByRole('button', { name: 'Check and use' }));
 
-    expect(ipc.voiceKeySave).toHaveBeenCalledWith('fishaudio', 'fk-123', 'voice-9');
+    expect(ipc.voiceKeySave).toHaveBeenCalledWith('fishaudio', 'fk-123');
     expect(await screen.findByText('Connected. Voiceovers use your Fish Audio account')).toBeTruthy();
-    expect(onSaved).toHaveBeenCalledWith(withSource('fishaudio', 'voice-9'));
+    expect(onSaved).toHaveBeenCalledWith(withSource('fishaudio'));
     // The key is not kept on screen once saved.
     expect(screen.getByLabelText(/Fish Audio API key/)).toHaveProperty('value', '');
+    rerender(<VoiceSourceCard settings={withSource('fishaudio')} onSaved={onSaved} />);
+    expect(screen.getByRole('button', { name: 'Voice source: Fish Audio' })).toBeTruthy();
   });
 
   it('says when the free model speaks, and why a key was refused', async () => {
     const user = userEvent.setup();
     vi.mocked(ipc.voiceKeySave).mockResolvedValueOnce([{ ok: true, error: null, hasCredit: false }, withSource('fishaudio')]);
     const { unmount } = render(<VoiceSourceCard settings={base} onSaved={() => {}} />);
-    await user.click(screen.getByRole('tab', { name: 'Fish Audio' }));
+    await pick(user, 'Fish Audio');
     await user.type(screen.getByLabelText(/Fish Audio API key/), 'fk-free');
     await user.click(screen.getByRole('button', { name: 'Check and use' }));
     expect(await screen.findByText("Connected. Your API balance is empty, so voiceovers use Fish Audio's free model")).toBeTruthy();
@@ -66,7 +84,7 @@ describe('VoiceSourceCard', () => {
     vi.mocked(ipc.voiceKeySave).mockResolvedValueOnce([{ ok: false, error: 'bad-key', hasCredit: null }, base]);
     const onSaved = vi.fn();
     render(<VoiceSourceCard settings={base} onSaved={onSaved} />);
-    await user.click(screen.getByRole('tab', { name: 'Fish Audio' }));
+    await pick(user, 'Fish Audio');
     await user.type(screen.getByLabelText(/Fish Audio API key/), 'nope');
     await user.click(screen.getByRole('button', { name: 'Check and use' }));
     expect(await screen.findByText('Fish Audio refused this key. Check it, then try once more')).toBeTruthy();
@@ -75,7 +93,7 @@ describe('VoiceSourceCard', () => {
     expect(screen.getByLabelText(/Fish Audio API key/)).toHaveProperty('value', 'nope');
   });
 
-  it('a saved key switches to Fish Audio in one click, and can be removed', async () => {
+  it('a saved key switches to Fish Audio in one pick, and can be removed', async () => {
     vi.mocked(ipc.voiceStatus).mockResolvedValue({ hasElevenKey: false, hasFishKey: true });
     vi.mocked(ipc.voiceKeyClear).mockResolvedValue(base);
     const onSaved = vi.fn();
@@ -83,30 +101,29 @@ describe('VoiceSourceCard', () => {
     const user = userEvent.setup();
     await waitFor(() => expect(ipc.voiceStatus).toHaveBeenCalled());
 
-    await user.click(screen.getByRole('tab', { name: 'Fish Audio' }));
+    await pick(user, 'Fish Audio');
     await waitFor(() => expect(ipc.updateSettings).toHaveBeenCalledWith({ voiceSource: 'fishaudio' }));
     rerender(<VoiceSourceCard settings={withSource('fishaudio')} onSaved={onSaved} />);
-    expect(screen.getByText('On. Voiceovers are made with Fish Audio')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Voice source: Fish Audio' })).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: 'Remove key' }));
     await waitFor(() => expect(onSaved).toHaveBeenLastCalledWith(base));
     expect(ipc.voiceKeyClear).toHaveBeenCalledWith('fishaudio');
   });
 
-  it('ElevenLabs takes its own key and voice, and says when the quota is used up', async () => {
-    const eleven = { ...base, voiceSource: 'elevenlabs', elevenVoiceId: 'Voice123' } as Settings;
+  it('ElevenLabs takes its own key, and says when the quota is used up', async () => {
+    const eleven = withSource('elevenlabs');
     vi.mocked(ipc.voiceKeySave).mockResolvedValueOnce([{ ok: true, error: null, hasCredit: true }, eleven]);
     const onSaved = vi.fn();
     const { unmount } = render(<VoiceSourceCard settings={base} onSaved={onSaved} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('tab', { name: 'ElevenLabs' }));
+    await pick(user, 'ElevenLabs');
     expect(ipc.updateSettings).not.toHaveBeenCalled();
     expect(screen.getByRole('link', { name: 'Get a key' }).getAttribute('href')).toBe('https://elevenlabs.io/app/settings/api-keys');
     await user.type(screen.getByLabelText(/ElevenLabs API key/), 'sk_abc');
-    await user.type(screen.getByLabelText('Voice ID (optional)'), 'Voice123');
     await user.click(screen.getByRole('button', { name: 'Check and use' }));
-    expect(ipc.voiceKeySave).toHaveBeenCalledWith('elevenlabs', 'sk_abc', 'Voice123');
+    expect(ipc.voiceKeySave).toHaveBeenCalledWith('elevenlabs', 'sk_abc');
     expect(await screen.findByText('Connected. Voiceovers use your ElevenLabs account')).toBeTruthy();
     expect(onSaved).toHaveBeenCalledWith(eleven);
     unmount();
@@ -114,20 +131,21 @@ describe('VoiceSourceCard', () => {
     // The key is good but there are no characters left: no free model to fall back to.
     vi.mocked(ipc.voiceKeySave).mockResolvedValueOnce([{ ok: true, error: null, hasCredit: false }, eleven]);
     render(<VoiceSourceCard settings={base} onSaved={() => {}} />);
-    await user.click(screen.getByRole('tab', { name: 'ElevenLabs' }));
+    await pick(user, 'ElevenLabs');
     await user.type(screen.getByLabelText(/ElevenLabs API key/), 'sk_abc');
     await user.click(screen.getByRole('button', { name: 'Check and use' }));
     expect(await screen.findByText('The key works, but your ElevenLabs quota is used up')).toBeTruthy();
   });
 
-  it('VoiceStudio is picked right away and says whether the app is open', async () => {
+  it('VoiceStudio is in use right away and says whether the app is open', async () => {
     vi.mocked(ipc.voiceStudioCheck).mockResolvedValueOnce({ ok: false, error: 'not-running', hasCredit: null });
     const onSaved = vi.fn();
-    render(<VoiceSourceCard settings={base} onSaved={onSaved} />);
+    const { rerender } = render(<VoiceSourceCard settings={base} onSaved={onSaved} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('tab', { name: 'VoiceStudio' }));
+    await pick(user, 'VoiceStudio');
     await waitFor(() => expect(ipc.updateSettings).toHaveBeenCalledWith({ voiceSource: 'voicestudio' }));
+    rerender(<VoiceSourceCard settings={withSource('voicestudio')} onSaved={onSaved} />);
     expect(await screen.findByText("VoiceStudio isn't open. Open the app, then check again")).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Get VoiceStudio' }).getAttribute('href')).toBe('https://voicestudio.sh');
 

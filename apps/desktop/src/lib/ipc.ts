@@ -51,8 +51,8 @@ export const apiReachable = (baseUrl: string) => invoke<boolean>('api_reachable'
 /** Which voice sources have a key saved (the keys themselves never leave Rust). */
 export const voiceStatus = () => invoke<VoiceStatus>('voice_status');
 /** Checks the source's API key (null: the saved one); a good one is saved and that source becomes the voice source. */
-export const voiceKeySave = (source: VoiceKeySource, key: string | null, voiceId: string | null) =>
-  invoke<[VoiceCheck, Settings]>('voice_key_save', { source, key, voiceId });
+export const voiceKeySave = (source: VoiceKeySource, key: string | null) =>
+  invoke<[VoiceCheck, Settings]>('voice_key_save', { source, key });
 /** Forgets the source's API key; the voice source goes back to Tayang when it was that source. */
 export const voiceKeyClear = (source: VoiceKeySource) => invoke<Settings>('voice_key_clear', { source });
 /** Whether VoiceStudio is open on this computer. */

@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, RefreshCw } from 'lucide-react';
+import { Check, ChevronDown, RefreshCw } from 'lucide-react';
 import type { Settings, VoiceCheck, VoiceErrorCode, VoiceKeySource, VoiceSource } from '@tayang/shared';
 import elevenlabs from '@/assets/brand/elevenlabs.svg';
 import fishaudio from '@/assets/brand/fishaudio.svg';
 import tayang from '@/assets/brand/oyen-symbol-color.svg';
 import voicestudio from '@/assets/brand/voicestudio.svg';
 import { Button } from '@/components/Button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { updateSettings, voiceKeyClear, voiceKeySave, voiceStatus, voiceStudioCheck } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
 
@@ -21,20 +21,18 @@ const SOURCES: { id: VoiceSource; name: string; logo: string }[] = [
   { id: 'fishaudio', name: 'Fish Audio', logo: fishaudio },
   { id: 'voicestudio', name: 'VoiceStudio', logo: voicestudio },
 ];
-
-/** The sources that speak with the user's own API key. */
-const KEY_SOURCES: Record<VoiceKeySource, { name: string; keysUrl: string; voiceKey: 'elevenVoiceId' | 'fishVoiceId' }> = {
-  elevenlabs: { name: 'ElevenLabs', keysUrl: 'https://elevenlabs.io/app/settings/api-keys', voiceKey: 'elevenVoiceId' },
-  fishaudio: { name: 'Fish Audio', keysUrl: 'https://fish.audio/app/api-keys', voiceKey: 'fishVoiceId' },
+const KEYS_URL: Record<VoiceKeySource, string> = {
+  elevenlabs: 'https://elevenlabs.io/app/settings/api-keys',
+  fishaudio: 'https://fish.audio/app/api-keys',
 };
 const isKeySource = (s: VoiceSource): s is VoiceKeySource => s === 'elevenlabs' || s === 'fishaudio';
+const sourceOf = (id: VoiceSource) => SOURCES.find((s) => s.id === id) ?? SOURCES[0]!;
 
-type ErrorKey = 'noKey' | 'badKey' | 'noBalance' | 'badVoice' | 'notRunning' | 'busy' | 'failed';
+type ErrorKey = 'noKey' | 'badKey' | 'noBalance' | 'notRunning' | 'busy' | 'failed';
 const ERROR_KEY: Record<VoiceErrorCode, ErrorKey> = {
   'no-key': 'noKey',
   'bad-key': 'badKey',
   'no-balance': 'noBalance',
-  'bad-voice': 'badVoice',
   'not-running': 'notRunning',
   'too-long': 'failed',
   busy: 'busy',
@@ -52,19 +50,17 @@ function Status({ ok, children }: { ok: boolean; children: string }) {
 
 const linkClass = 'text-xs text-primary hover:text-accent-hover';
 
-/** ElevenLabs or Fish Audio: the API key, an optional voice id, and what trying the key said. */
-function KeyPanel({ source, settings, active, hasKey, onHasKey, onSaved }: {
+/** ElevenLabs or Fish Audio: the API key, and what trying it said. */
+function KeyPanel({ source, active, hasKey, onHasKey, onSaved }: {
   source: VoiceKeySource;
-  settings: Settings;
   active: boolean;
   hasKey: boolean;
   onHasKey(has: boolean): void;
   onSaved(s: Settings): void;
 }) {
   const { t } = useTranslation();
-  const { name, keysUrl, voiceKey } = KEY_SOURCES[source];
+  const { name } = sourceOf(source);
   const [key, setKey] = useState('');
-  const [voiceId, setVoiceId] = useState(settings[voiceKey] ?? '');
   const [busy, setBusy] = useState(false);
   const [check, setCheck] = useState<VoiceCheck | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +71,7 @@ function KeyPanel({ source, settings, active, hasKey, onHasKey, onSaved }: {
     setError(null);
     setCheck(null);
     try {
-      const [result, saved] = await voiceKeySave(source, key.trim() || null, voiceId.trim() || null);
+      const [result, saved] = await voiceKeySave(source, key.trim() || null);
       setCheck(result);
       if (result.ok) {
         onHasKey(true);
@@ -96,7 +92,6 @@ function KeyPanel({ source, settings, active, hasKey, onHasKey, onSaved }: {
       onSaved(await voiceKeyClear(source));
       onHasKey(false);
       setCheck(null);
-      setVoiceId('');
     } catch (e) {
       fail(e);
     } finally {
@@ -117,46 +112,33 @@ function KeyPanel({ source, settings, active, hasKey, onHasKey, onSaved }: {
       <div className="flex flex-col gap-2">
         <label htmlFor={`${source}-key`} className="text-[13px] text-[#D9D9D9]">
           {t('voice.keyLabel', { name })}{' '}
-          <a href={keysUrl} target="_blank" rel="noreferrer" className={cn('ml-1', linkClass)}>
+          <a href={KEYS_URL[source]} target="_blank" rel="noreferrer" className={cn('ml-1', linkClass)}>
             {t('voice.getKey')}
           </a>
         </label>
-        <Input
-          id={`${source}-key`}
-          type="password"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-          placeholder={hasKey ? t('voice.keySaved') : undefined}
-          autoComplete="off"
-          className="h-9 bg-background font-mono text-[13px]"
-        />
-      </div>
-      <div className="flex flex-col gap-2">
-        <label htmlFor={`${source}-voice`} className="text-[13px] text-[#D9D9D9]">{t('voice.voiceId')}</label>
-        <Input
-          id={`${source}-voice`}
-          value={voiceId}
-          onChange={(e) => setVoiceId(e.target.value)}
-          autoComplete="off"
-          spellCheck={false}
-          className="h-9 bg-background font-mono text-[13px]"
-        />
-        <span className="text-xs text-text-3">{t('voice.voiceIdHint', { name })}</span>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="light" className="h-9 px-3 text-[13px] font-semibold" disabled={busy || (!key.trim() && !hasKey)} onClick={() => void save()}>
-          {busy ? t('voice.checking') : t('voice.keySave')}
-        </Button>
-        {hasKey && (
-          <Button variant="ghost" className="h-9 px-2 text-[13px]" disabled={busy} onClick={() => void remove()}>
-            {t('voice.keyRemove')}
+        <div className="flex flex-wrap gap-2">
+          <Input
+            id={`${source}-key`}
+            type="password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder={hasKey ? t('voice.keySaved') : undefined}
+            autoComplete="off"
+            className="h-9 min-w-60 flex-1 bg-background font-mono text-[13px]"
+          />
+          <Button variant="light" className="h-9 px-3 text-[13px] font-semibold" disabled={busy || (!key.trim() && !hasKey)} onClick={() => void save()}>
+            {busy ? t('voice.checking') : t('voice.keySave')}
           </Button>
-        )}
+          {hasKey && (
+            <Button variant="ghost" className="h-9 px-2 text-[13px]" disabled={busy} onClick={() => void remove()}>
+              {t('voice.keyRemove')}
+            </Button>
+          )}
+        </div>
       </div>
       {connected && <Status ok>{connected}</Status>}
       {check?.ok && !connected && <Status ok={false}>{t('voice.errors.noBalance', { name })}</Status>}
       {check && !check.ok && <Status ok={false}>{t(`voice.errors.${ERROR_KEY[check.error ?? 'failed']}`, { name })}</Status>}
-      {!check && active && <Status ok>{t('voice.active', { name })}</Status>}
       {!check && !active && !hasKey && <span className="text-xs text-text-3">{t('voice.notYet')}</span>}
       {error && <p role="alert" className="m-0 text-[13px] text-orange-light">{error}</p>}
     </>
@@ -164,14 +146,15 @@ function KeyPanel({ source, settings, active, hasKey, onHasKey, onSaved }: {
 }
 
 /**
- * Settings › Video: where voice-overs come from. Tayang credits, the user's own ElevenLabs or Fish
+ * Settings › Tools: where voice-overs come from. Tayang credits, the user's own ElevenLabs or Fish
  * Audio key, or VoiceStudio on this computer. Agents always call Tayang's /voice; this picks who speaks.
  */
 export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onSaved(s: Settings): void }) {
   const { t } = useTranslation();
   const active: VoiceSource = settings.voiceSource ?? 'tayang';
-  /** The source whose panel is open: a source with a key can be open before a key makes it the active one. */
-  const [shown, setShown] = useState<VoiceSource>(active);
+  /** A source with a key that was picked to set up its key: its panel is open even while another source is in use. */
+  const [setup, setSetup] = useState<VoiceKeySource | null>(null);
+  const shown: VoiceSource = setup ?? active;
   const [hasKey, setHasKey] = useState<Record<VoiceKeySource, boolean>>({ elevenlabs: false, fishaudio: false });
   const [studio, setStudio] = useState<VoiceCheck | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -189,10 +172,14 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
   }, [shown]);
 
   const pick = async (source: VoiceSource) => {
-    setShown(source);
     setError(null);
-    // A source with a key only becomes the source once its key is saved.
-    if (source === active || (isKeySource(source) && !hasKey[source])) return;
+    // A source with a key only becomes the one in use once its key is saved.
+    if (isKeySource(source) && !hasKey[source]) {
+      setSetup(source);
+      return;
+    }
+    setSetup(null);
+    if (source === active) return;
     try {
       onSaved(await updateSettings({ voiceSource: source }));
     } catch (e) {
@@ -201,6 +188,7 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
   };
 
   const label = t('voice.source');
+  const current = sourceOf(active);
 
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
@@ -209,16 +197,32 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
           <span className="text-sm">{label}</span>
           <span className="text-xs text-text-3">{t('voice.sourceHint')}</span>
         </div>
-        <Tabs value={shown} onValueChange={(v) => void pick(v as VoiceSource)}>
-          <TabsList aria-label={label} className="h-9 bg-background">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={`${label}: ${current.name}`}
+              className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-hairline bg-background px-3 text-[13px] text-foreground hover:bg-raised"
+            >
+              <img src={current.logo} alt="" aria-hidden="true" className="size-4 shrink-0" />
+              {current.name}
+              <ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" className="shrink-0 text-text-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64 border-hairline bg-card">
             {SOURCES.map((o) => (
-              <TabsTrigger key={o.id} value={o.id} className="gap-2 px-3 text-[13px]">
-                <img src={o.logo} alt="" aria-hidden="true" className="size-3.5 shrink-0" />
-                {o.name}
-              </TabsTrigger>
+              <DropdownMenuItem key={o.id} onSelect={() => void pick(o.id)} className="h-9 gap-2 text-[13px]">
+                <img src={o.logo} alt="" aria-hidden="true" className="size-4 shrink-0" />
+                <span className="font-medium">{o.name}</span>
+                {o.id === active ? (
+                  <Check data-testid="voice-check" size={14} strokeWidth={1.5} aria-hidden="true" className="ml-auto" />
+                ) : (
+                  isKeySource(o.id) && !hasKey[o.id] && <span className="ml-auto text-[11px] text-text-3">{t('voice.needsKey')}</span>
+                )}
+              </DropdownMenuItem>
             ))}
-          </TabsList>
-        </Tabs>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="flex flex-col gap-3 border-t border-[#222] px-4 py-3">
@@ -228,7 +232,6 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
           <KeyPanel
             key={shown}
             source={shown}
-            settings={settings}
             active={active === shown}
             hasKey={hasKey[shown]}
             onHasKey={(has) => setHasKey((k) => ({ ...k, [shown]: has }))}

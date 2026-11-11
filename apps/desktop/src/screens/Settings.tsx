@@ -516,7 +516,6 @@ export function Settings() {
                 />
               </Row>
             </Card>
-            <VoiceSourceCard settings={settings} onSaved={setSettings} />
           </section>
         )}
 
@@ -580,6 +579,8 @@ export function Settings() {
                 />
               ))}
             </ul>
+            <h3 className="m-0 mt-3 text-sm font-medium">{t('voice.title')}</h3>
+            <VoiceSourceCard settings={settings} onSaved={setSettings} />
           </section>
         )}
 

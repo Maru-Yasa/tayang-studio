@@ -282,10 +282,6 @@ export interface Settings {
   apiProvider?: ApiProvider | null;
   /** Where voice-overs come from; missing: Tayang credits. API keys stay in the keychain. */
   voiceSource?: VoiceSource;
-  /** The ElevenLabs voice to speak with (a voice id from the user's account); null: a default voice. */
-  elevenVoiceId?: string | null;
-  /** The Fish Audio voice to speak with (a voice's id on fish.audio); null: its default voice. */
-  fishVoiceId?: string | null;
 }
 
 /** Tayang credits, the user's own ElevenLabs or Fish Audio key, or VoiceStudio running on this computer. */
@@ -295,7 +291,7 @@ export type VoiceSource = 'tayang' | 'elevenlabs' | 'fishaudio' | 'voicestudio';
 export type VoiceKeySource = 'elevenlabs' | 'fishaudio';
 
 /** Why the user's own voice can't speak (the desktop's `VoiceError` codes). */
-export type VoiceErrorCode = 'no-key' | 'bad-key' | 'no-balance' | 'bad-voice' | 'not-running' | 'too-long' | 'busy' | 'failed';
+export type VoiceErrorCode = 'no-key' | 'bad-key' | 'no-balance' | 'not-running' | 'too-long' | 'busy' | 'failed';
 
 /**
  * The answer of trying a voice source. `hasCredit`: the account has credit left (null when the key
