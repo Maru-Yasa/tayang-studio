@@ -113,12 +113,12 @@ export function SkillImportDialog({ open, onOpenChange, onAdded }: { open: boole
           <DialogDescription>{t('skills.importHint')}</DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={(e) => void find(e)} className="flex flex-col gap-1.5">
+        <form onSubmit={(e) => void find(e)} className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="skill-github" className="flex items-center gap-1.5 text-[13px] font-medium">
             <Link2 size={14} strokeWidth={1.5} aria-hidden="true" />
             {t('skills.fromGithub')}
           </label>
-          <div className="flex gap-2">
+          <div className="flex min-w-0 gap-2">
             <Input
               id="skill-github"
               autoFocus
@@ -138,9 +138,9 @@ export function SkillImportDialog({ open, onOpenChange, onAdded }: { open: boole
         </form>
 
         {download && (
-          <section aria-label={t('skills.found', { count: download.skills.length })} className="flex flex-col gap-2">
+          <section aria-label={t('skills.found', { count: download.skills.length })} className="flex min-w-0 flex-col gap-2">
             <span className="text-[13px] text-text-2">{t('skills.found', { count: download.skills.length })}</span>
-            <ul className="m-0 flex max-h-[40vh] list-none flex-col overflow-y-auto rounded-xl border border-border p-0">
+            <ul className="m-0 flex max-h-[40vh] min-w-0 list-none flex-col overflow-y-auto rounded-xl border border-border p-0">
               {download.skills.map((s) => {
                 const id = `found-${s.folder || 'root'}`;
                 return (
@@ -158,7 +158,7 @@ export function SkillImportDialog({ open, onOpenChange, onAdded }: { open: boole
                       </span>
                       <span className="line-clamp-2 text-xs text-text-2">{s.description}</span>
                       {s.scriptCount > 0 && (
-                        <span className="truncate font-mono text-[11px] text-text-3">
+                        <span className="line-clamp-2 font-mono text-[11px] break-all text-text-3">
                           {s.scripts.slice(0, 3).join(', ')}
                           {s.scriptCount > 3 && ` ${t('skills.moreFiles', { count: s.scriptCount - 3 })}`}
                         </span>
@@ -172,7 +172,7 @@ export function SkillImportDialog({ open, onOpenChange, onAdded }: { open: boole
         )}
 
         {runsCode && (
-          <div role="note" className="flex items-start gap-3 rounded-lg border border-deep-orange px-3 py-2.5">
+          <div role="note" className="flex min-w-0 items-start gap-3 rounded-lg border border-deep-orange px-3 py-2.5">
             <Oyen mood="surprised" size={24} />
             <span className="text-[13px] text-text-2">{t('skills.codeWarning')}</span>
           </div>
