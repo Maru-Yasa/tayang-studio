@@ -51,10 +51,11 @@ describe('VoiceSourceCard', () => {
     const user = userEvent.setup();
 
     await pick(user, 'Fish Audio');
-    // Picking it opens its key step; the button still says what is in use.
+    // The button follows the pick, and says it isn't in use until the key is saved.
     expect(ipc.updateSettings).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Voice source: Tayang' })).toBeTruthy();
-    expect(screen.getByText('Not on yet. Save an API key first')).toBeTruthy();
+    const button = screen.getByRole('button', { name: 'Voice source: Fish Audio' });
+    expect(within(button).getByText('Not on yet')).toBeTruthy();
+    expect(screen.getByText('Not on yet. Voiceovers still use Tayang until the API key is saved')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Check and use' })).toHaveProperty('disabled', true);
     // No voice to pick: the default voice speaks.
     expect(screen.queryByLabelText(/Voice ID/)).toBeNull();
@@ -68,7 +69,7 @@ describe('VoiceSourceCard', () => {
     // The key is not kept on screen once saved.
     expect(screen.getByLabelText(/Fish Audio API key/)).toHaveProperty('value', '');
     rerender(<VoiceSourceCard settings={withSource('fishaudio')} onSaved={onSaved} />);
-    expect(screen.getByRole('button', { name: 'Voice source: Fish Audio' })).toBeTruthy();
+    expect(within(screen.getByRole('button', { name: 'Voice source: Fish Audio' })).queryByText('Not on yet')).toBeNull();
   });
 
   it('says when the free model speaks, and why a key was refused', async () => {

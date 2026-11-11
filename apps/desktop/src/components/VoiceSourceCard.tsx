@@ -51,9 +51,11 @@ function Status({ ok, children }: { ok: boolean; children: string }) {
 const linkClass = 'text-xs text-primary hover:text-accent-hover';
 
 /** ElevenLabs or Fish Audio: the API key, and what trying it said. */
-function KeyPanel({ source, active, hasKey, onHasKey, onSaved }: {
+function KeyPanel({ source, active, inUse, hasKey, onHasKey, onSaved }: {
   source: VoiceKeySource;
   active: boolean;
+  /** The name of the source that speaks until this one's key is saved. */
+  inUse: string;
   hasKey: boolean;
   onHasKey(has: boolean): void;
   onSaved(s: Settings): void;
@@ -139,7 +141,7 @@ function KeyPanel({ source, active, hasKey, onHasKey, onSaved }: {
       {connected && <Status ok>{connected}</Status>}
       {check?.ok && !connected && <Status ok={false}>{t('voice.errors.noBalance', { name })}</Status>}
       {check && !check.ok && <Status ok={false}>{t(`voice.errors.${ERROR_KEY[check.error ?? 'failed']}`, { name })}</Status>}
-      {!check && !active && !hasKey && <span className="text-xs text-text-3">{t('voice.notYet')}</span>}
+      {!check && !active && !hasKey && <span className="text-xs text-text-3">{t('voice.notYet', { name: inUse })}</span>}
       {error && <p role="alert" className="m-0 text-[13px] text-orange-light">{error}</p>}
     </>
   );
@@ -188,7 +190,9 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
   };
 
   const label = t('voice.source');
-  const current = sourceOf(active);
+  // The button follows what was picked; a source still waiting for its key says so.
+  const current = sourceOf(shown);
+  const pending = shown !== active;
 
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
@@ -206,6 +210,7 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
             >
               <img src={current.logo} alt="" aria-hidden="true" className="size-4 shrink-0" />
               {current.name}
+              {pending && <span className="text-[11px] text-orange-light">{t('voice.pending')}</span>}
               <ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" className="shrink-0 text-text-3" />
             </button>
           </DropdownMenuTrigger>
@@ -233,6 +238,7 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
             key={shown}
             source={shown}
             active={active === shown}
+            inUse={sourceOf(active).name}
             hasKey={hasKey[shown]}
             onHasKey={(has) => setHasKey((k) => ({ ...k, [shown]: has }))}
             onSaved={onSaved}
