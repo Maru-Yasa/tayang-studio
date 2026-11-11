@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { FileUp, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
+import { SkillImportDialog } from '@/components/SkillImportDialog';
 import { BUILTIN_SKILLS, type UserSkill } from '@tayang/skills';
 import { Button } from '@/components/Button';
 import { Markdown } from '@/components/Markdown';
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { deleteSkill, importSkill, listSkills, readSkill, saveSkill, setSkillEnabled } from '@/lib/ipc';
+import { deleteSkill, listSkills, readSkill, saveSkill, setSkillEnabled } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -126,6 +126,16 @@ function SkillCard({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="truncate font-mono text-[13px] font-medium">{skill.id}</span>
         <span className="line-clamp-2 text-[13px] text-text-2">{skill.description}</span>
+        {skill.source && (
+          <a
+            href={skill.source}
+            target="_blank"
+            rel="noreferrer"
+            className="w-fit max-w-full truncate text-xs text-text-3 hover:text-foreground"
+          >
+            {t('skills.fromLink', { source: skill.source.replace(/^https:\/\//, '') })}
+          </a>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {confirming ? (
@@ -172,6 +182,7 @@ export function Skills() {
   const [editing, setEditing] = useState<Editing | null>(null);
   const [viewing, setViewing] = useState<(typeof BUILTIN_SKILLS)[number] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(() => {
     listSkills()
@@ -190,11 +201,6 @@ export function Skills() {
       .finally(load);
   };
 
-  const importOne = () =>
-    act(async () => {
-      const picked = await openDialog({ multiple: false, directory: false, filters: [{ name: 'SKILL.md', extensions: ['md'] }] });
-      if (typeof picked === 'string') await importSkill(picked);
-    });
 
   const edit = (s: UserSkill) =>
     act(async () => {
@@ -210,7 +216,7 @@ export function Skills() {
           <span className="text-sm text-text-2">{t('skills.subtitle')}</span>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={importOne}>
+          <Button variant="secondary" onClick={() => setImporting(true)}>
             <FileUp size={16} strokeWidth={1.5} aria-hidden="true" />
             {t('skills.import')}
           </Button>
@@ -271,6 +277,8 @@ export function Skills() {
           </article>
         ))}
       </section>
+
+      <SkillImportDialog open={importing} onOpenChange={setImporting} onAdded={load} />
 
       <SkillEditor editing={editing} onClose={() => setEditing(null)} onSaved={load} />
 
