@@ -1,0 +1,76 @@
+name: Add Linux ARM to a release
+
+# Builds the Linux ARM (aarch64) installers for a version that is already released, from that
+# version's tag, and adds them to its GitHub release. tauri-action merges the linux-aarch64 entries
+# into the release's latest.json, so installed ARM copies get updates like every other platform.
+# New releases build Linux ARM in release.yml; this is for releases made before it did.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The released tag, like v0.0.8
+        required: true
+
+concurrency:
+  group: release-${{ inputs.tag }}
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Linux ARM for ${{ inputs.tag }}
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - name: Find the release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq .id) || {
+            echo "::error::No release for ${TAG}."
+            exit 1
+          }
+          echo "id=$id" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Linux libraries for Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: aarch64-unknown-linux-gnu
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_POSTHOG_KEY: ${{ vars.VITE_POSTHOG_KEY }}
+          VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          args: --target aarch64-unknown-linux-gnu
+          releaseId: ${{ steps.release.outputs.id }}
