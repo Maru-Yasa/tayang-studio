@@ -18,7 +18,7 @@ export interface SystemInfo {
   packageManager: PackageManager | null;
 }
 
-export type ToolId = 'node' | 'ffmpeg' | 'chrome' | 'ytdlp' | 'elevenlabs-mcp';
+export type ToolId = 'node' | 'ffmpeg' | 'chrome' | 'ytdlp';
 
 export interface ToolStatus {
   id: ToolId;

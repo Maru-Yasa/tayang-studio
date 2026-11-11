@@ -1,7 +1,5 @@
 import type { AgentId, SystemInfo, ToolId } from '@tayang/shared';
 
-const KEY_MASK = 'sk_••••';
-
 /** Where Node.js comes from: agents need Node to run, so the agent can't install it. */
 export const NODE_DOWNLOAD_URL = 'https://nodejs.org/en/download';
 
@@ -56,26 +54,11 @@ const MAC_YTDLP = [
   'chmod +x ~/.local/bin/yt-dlp',
 ];
 
-function uvInstall(sys: SystemInfo): string {
-  if (sys.os === 'windows') return 'winget install --id astral-sh.uv -e';
-  if (sys.packageManager === 'brew') return 'brew install uv';
-  // The official installer puts uv in ~/.local/bin, no sudo.
-  return 'curl -LsSf https://astral.sh/uv/install.sh | sh';
-}
-
-function elevenLabsCommands(sys: SystemInfo, agent: AgentId, key: string): string[] {
-  const cmds = [uvInstall(sys)];
-  if (agent === 'claude') {
-    cmds.push(`claude mcp add -s user elevenlabs -e ELEVENLABS_API_KEY=${key} -- uvx elevenlabs-mcp`);
-  }
-  return cmds;
-}
-
 export function installCommands(tool: ToolId, sys: SystemInfo, agent: AgentId): string[] {
-  return commandsFor(tool, sys, agent, KEY_MASK);
+  return commandsFor(tool, sys);
 }
 
-function commandsFor(tool: ToolId, sys: SystemInfo, agent: AgentId, key: string): string[] {
+function commandsFor(tool: ToolId, sys: SystemInfo): string[] {
   const pm = sys.packageManager;
   switch (tool) {
     case 'ffmpeg':
@@ -97,8 +80,6 @@ function commandsFor(tool: ToolId, sys: SystemInfo, agent: AgentId, key: string)
       if (pm === 'winget' || sys.os === 'windows') return ['winget install --id Google.Chrome -e'];
       if (sys.os === 'macos') return []; // the user installs it from CHROME_DOWNLOAD_URL
       return [pmInstall(sys, 'chromium')];
-    case 'elevenlabs-mcp':
-      return elevenLabsCommands(sys, agent, key);
     default:
       return [];
   }
@@ -106,7 +87,7 @@ function commandsFor(tool: ToolId, sys: SystemInfo, agent: AgentId, key: string)
 
 /** True when this install can only go through the system package manager with sudo. */
 export function needsSudo(tool: ToolId, sys: SystemInfo): boolean {
-  return commandsFor(tool, sys, 'claude', '').some((c) => c.startsWith('sudo '));
+  return commandsFor(tool, sys).some((c) => c.startsWith('sudo '));
 }
 
 const VERIFY: Record<ToolId, string> = {
@@ -114,7 +95,6 @@ const VERIFY: Record<ToolId, string> = {
   ytdlp: '`yt-dlp --version`',
   node: '`node --version`',
   chrome: 'the path where Chrome or Chromium is installed',
-  'elevenlabs-mcp': 'your MCP server list',
 };
 
 const NAMES: Record<ToolId, string> = {
@@ -122,7 +102,6 @@ const NAMES: Record<ToolId, string> = {
   ytdlp: 'yt-dlp',
   node: 'Node.js 22 or newer',
   chrome: 'Google Chrome (or Chromium on Linux)',
-  'elevenlabs-mcp': 'the ElevenLabs MCP server',
 };
 
 const USER_SPACE =
@@ -132,28 +111,15 @@ export function buildInstallPrompt(
   tool: ToolId,
   sys: SystemInfo,
   agent: AgentId,
-  opts?: { elevenLabsKey?: string },
 ): string {
   const lines: string[] = [];
   lines.push(`Please install ${NAMES[tool]} on this computer (${sys.os} ${sys.osVersion}).`);
   const run = (cmds: string[]) => lines.push(...cmds.map((c) => `  ${c}`));
-  if (tool === 'elevenlabs-mcp') {
-    const key = opts?.elevenLabsKey ?? '<ELEVENLABS_API_KEY>';
-    if (agent === 'claude') {
-      lines.push('Install `uv` first if it is missing, then register the MCP server. Run:');
-      run(commandsFor(tool, sys, agent, key));
-    } else {
-      lines.push('Install `uv` first if it is missing:');
-      run([commandsFor(tool, sys, agent, key)[0]!]);
-      lines.push(
-        `Then add an MCP server named \`elevenlabs\` that runs \`uvx elevenlabs-mcp\` with the environment variable \`ELEVENLABS_API_KEY=${key}\`, in your user-level (global) MCP configuration so it works in every folder.`,
-      );
-    }
-  } else if (needsSudo(tool, sys)) {
+  if (needsSudo(tool, sys)) {
     // A sudo password prompt can't be answered from inside the agent.
     lines.push('This needs the system package manager with sudo. Do not run sudo yourself.');
     lines.push('Ask the user to run this command in their own terminal, then check that it worked:');
-    run(commandsFor(tool, sys, agent, ''));
+    run(commandsFor(tool, sys));
   } else if ((tool === 'ffmpeg' || tool === 'ytdlp') && (macNoBrew(sys) || sys.os === 'linux')) {
     lines.push(sys.os === 'macos' ? `This Mac has no Homebrew. ${USER_SPACE}` : USER_SPACE);
     if (tool === 'ytdlp' && sys.os === 'linux') {
@@ -161,11 +127,11 @@ export function buildInstallPrompt(
     } else {
       lines.push('For example (replace the <a|b> part with the right CPU build):');
     }
-    run(commandsFor(tool, sys, agent, ''));
+    run(commandsFor(tool, sys));
     if (tool === 'ffmpeg') lines.push('Install `ffprobe` next to `ffmpeg`: Tayang needs both.');
   } else {
     lines.push('Run:');
-    run(commandsFor(tool, sys, agent, ''));
+    run(commandsFor(tool, sys));
   }
   lines.push(`Then verify with ${VERIFY[tool]} and reply with only the version you see.`);
   return lines.join('\n');

@@ -62,8 +62,6 @@ pub enum ToolId {
     Chrome,
     #[serde(rename = "ytdlp")]
     Ytdlp,
-    #[serde(rename = "elevenlabs-mcp")]
-    ElevenlabsMcp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -701,7 +699,7 @@ mod tests {
 
     #[test]
     fn tool_id_and_job_kind_literals() {
-        assert_eq!(serde_json::to_value(ToolId::ElevenlabsMcp).unwrap(), json!("elevenlabs-mcp"));
+        assert_eq!(serde_json::to_value(ToolId::Ytdlp).unwrap(), json!("ytdlp"));
         assert_eq!(serde_json::to_value(JobKind::StudyStyle).unwrap(), json!("study-style"));
         assert_eq!(serde_json::to_value(JobStatus::NeedsYou).unwrap(), json!("needs-you"));
     }

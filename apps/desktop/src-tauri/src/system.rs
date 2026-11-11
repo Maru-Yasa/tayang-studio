@@ -474,18 +474,6 @@ pub fn detect_agents(exec: &dyn Exec) -> Vec<AgentInfo> {
         .collect()
 }
 
-/// True when `~/.claude.json` has an ElevenLabs server at user scope (top-level
-/// `mcpServers`). Local-scope entries under `projects` only work in that one folder, so
-/// they don't count.
-pub fn elevenlabs_in_claude_config(json: &str) -> bool {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
-        return false;
-    };
-    v.get("mcpServers")
-        .and_then(|s| s.as_object())
-        .is_some_and(|m| m.keys().any(|k| k.to_ascii_lowercase().contains("elevenlabs")))
-}
-
 fn chrome_found(exec: &dyn Exec, os: OsKind) -> bool {
     match os {
         OsKind::Macos => Path::new("/Applications/Google Chrome.app").exists(),
@@ -502,8 +490,7 @@ fn chrome_found(exec: &dyn Exec, os: OsKind) -> bool {
     }
 }
 
-/// `claude_config` is the Claude Code config folder Tayang runs Claude with.
-pub fn check_tools(exec: &dyn Exec, agent: AgentId, claude_config: &Path) -> Vec<ToolStatus> {
+pub fn check_tools(exec: &dyn Exec) -> Vec<ToolStatus> {
     let version_of = |bin: &str, arg: &str| -> Option<String> {
         exec.which(bin)?;
         exec.run(bin, &[arg]).and_then(|s| parse_version(&s))
@@ -558,25 +545,7 @@ pub fn check_tools(exec: &dyn Exec, agent: AgentId, claude_config: &Path) -> Vec
         detail: "Lets you copy the style of a video from a link".into(),
     };
 
-    let (el_found, el_detail) = if agent == AgentId::Claude {
-        let found = std::fs::read_to_string(claude_config.join(".claude.json"))
-            .map(|s| elevenlabs_in_claude_config(&s))
-            .unwrap_or(false);
-        (found, "Adds a natural voice to your videos")
-    } else {
-        (false, "Check your agent's MCP settings")
-    };
-    let elevenlabs = ToolStatus {
-        id: ToolId::ElevenlabsMcp,
-        name: "ElevenLabs voice".into(),
-        required: false,
-        found: el_found,
-        version: None,
-        ok: el_found,
-        detail: el_detail.into(),
-    };
-
-    vec![node, ffmpeg, chrome, ytdlp, elevenlabs]
+    vec![node, ffmpeg, chrome, ytdlp]
 }
 
 #[cfg(test)]
@@ -748,7 +717,7 @@ mod tests {
     #[test]
     fn old_node_is_not_ok() {
         let ex = FakeExec::default().with("node", "v20.11.0");
-        let t = check_tools(&ex, AgentId::Claude, Path::new("/nonexistent"));
+        let t = check_tools(&ex);
         let n = tool(&t, ToolId::Node);
         assert!(n.found && !n.ok && n.required);
         assert_eq!(n.version.as_deref(), Some("20.11.0"));
@@ -758,40 +727,18 @@ mod tests {
     #[test]
     fn new_node_is_ok() {
         let ex = FakeExec::default().with("node", "v22.1.0");
-        let t = check_tools(&ex, AgentId::Claude, Path::new("/nonexistent"));
+        let t = check_tools(&ex);
         assert!(tool(&t, ToolId::Node).ok);
     }
 
     #[test]
     fn missing_ffmpeg_is_not_found() {
         let ex = FakeExec::default();
-        let t = check_tools(&ex, AgentId::Claude, Path::new("/nonexistent"));
-        assert_eq!(t.len(), 5);
+        let t = check_tools(&ex);
+        assert_eq!(t.len(), 4);
         let f = tool(&t, ToolId::Ffmpeg);
         assert!(!f.found && !f.ok && f.required && f.version.is_none());
         assert!(!tool(&t, ToolId::Ytdlp).required);
-    }
-
-    #[test]
-    fn elevenlabs_config_detection() {
-        assert!(elevenlabs_in_claude_config(r#"{"mcpServers":{"elevenlabs":{}}}"#));
-        assert!(elevenlabs_in_claude_config(r#"{"mcpServers":{"my-ElevenLabs-tts":{}}}"#));
-        // Local scope (one folder only) doesn't count.
-        assert!(!elevenlabs_in_claude_config(
-            r#"{"projects":{"/a":{"mcpServers":{"elevenlabs":{}}}}}"#
-        ));
-        assert!(!elevenlabs_in_claude_config("{}"));
-        assert!(!elevenlabs_in_claude_config(r#"{"mcpServers":{"other":{}}}"#));
-        assert!(!elevenlabs_in_claude_config("not json"));
-    }
-
-    #[test]
-    fn non_claude_agent_elevenlabs_hint() {
-        let ex = FakeExec::default();
-        let t = check_tools(&ex, AgentId::Gemini, Path::new("/nonexistent"));
-        let e = tool(&t, ToolId::ElevenlabsMcp);
-        assert!(!e.found);
-        assert_eq!(e.detail, "Check your agent's MCP settings");
     }
 
     #[test]

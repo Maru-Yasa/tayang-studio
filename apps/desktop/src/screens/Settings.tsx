@@ -196,7 +196,6 @@ export function Settings() {
   const closing = useInstall((s) => s.closing);
   const refresh = useInstall((s) => s.refresh);
   const start = useInstall((s) => s.start);
-  const askKey = useInstall((s) => s.askKey);
   const agentId = settings?.defaultAgent ?? 'claude';
   const agentName = AGENT_NAMES[agentId];
 
@@ -278,8 +277,8 @@ export function Settings() {
 
   if (!settings) return null;
 
-  const install = (tool: ToolId, key?: string) => {
-    if (sys) void start(tool, { sys, agent: agentId, elevenLabsKey: key });
+  const install = (tool: ToolId) => {
+    if (sys) void start(tool, { sys, agent: agentId });
   };
   const tools = [...statuses].sort((a, b) => TOOL_ORDER.indexOf(a.id) - TOOL_ORDER.indexOf(b.id));
 
@@ -577,8 +576,7 @@ export function Settings() {
                   sys={sys}
                   agentName={agentName}
                   busy={!!active || closing || !sys}
-                  onInstall={(key) => install(t.id, key)}
-                  onAskKey={() => askKey(t.id)}
+                  onInstall={() => install(t.id)}
                 />
               ))}
             </ul>

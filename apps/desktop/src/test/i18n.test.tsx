@@ -227,10 +227,10 @@ it('re-renders without a restart', async () => {
 
 describe('tool names and details', () => {
   it('are said by tool id, and unknown ones pass through', () => {
-    const tool = { id: 'elevenlabs-mcp', name: 'ElevenLabs voice', detail: 'Adds a natural voice to your videos' } as const;
-    expect(toolName(tool)).toBe('ElevenLabs voice');
+    const tool = { id: 'chrome', name: 'Chrome browser', detail: 'Draws each frame of your video' } as const;
+    expect(toolName(tool)).toBe('Google Chrome');
     setUiLanguage('id');
-    expect(toolName(tool)).toBe('Suara ElevenLabs');
+    expect(toolName(tool)).toBe('Google Chrome');
     expect(toolDetail({ id: 'chrome', detail: 'Draws each frame of your video' })).toBe('Menggambar setiap frame sebelum di-encode');
     const unknown = { id: 'newtool', name: 'New tool', detail: 'Does a thing' } as unknown as typeof tool;
     expect(toolName(unknown)).toBe('New tool');
@@ -246,7 +246,6 @@ describe('tool names and details', () => {
         agentName="Claude Code"
         busy={false}
         onInstall={() => {}}
-        onAskKey={() => {}}
       />,
     );
     expect(screen.getByText('Menggambar setiap frame sebelum di-encode')).toBeInTheDocument();

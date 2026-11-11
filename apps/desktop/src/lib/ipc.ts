@@ -69,7 +69,7 @@ export interface EngineProgress {
 }
 export const getSystemInfo = () => invoke<SystemInfo>('get_system_info');
 export const detectAgents = () => invoke<AgentInfo[]>('detect_agents');
-export const checkTools = (agent: AgentId) => invoke<ToolStatus[]>('check_tools', { agent });
+export const checkTools = () => invoke<ToolStatus[]>('check_tools');
 export const getSettings = () => invoke<Settings>('get_settings');
 /** TAYANG_API_URL when the app was started with it: it wins over the API address in Settings. */
 export const apiUrlOverride = () => invoke<string | null>('api_url_override');

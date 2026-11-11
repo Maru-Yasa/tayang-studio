@@ -106,7 +106,7 @@ function KeyPanel({ source, settings, active, hasKey, onHasKey, onSaved }: {
         <label htmlFor={`${source}-key`} className="text-[13px] text-[#D9D9D9]">
           {t('voice.keyLabel', { name })}{' '}
           <a href={keysUrl} target="_blank" rel="noreferrer" className={cn('ml-1', linkClass)}>
-            {t('tools.getKey')}
+            {t('voice.getKey')}
           </a>
         </label>
         <Input

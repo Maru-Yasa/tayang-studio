@@ -74,7 +74,6 @@ const missingFfmpeg = [
   tool('node', 'Node.js', true, true),
   tool('ffmpeg', 'FFmpeg', true, false),
   tool('chrome', 'Chrome', true, true),
-  tool('elevenlabs-mcp', 'ElevenLabs MCP', false, false),
   tool('ytdlp', 'yt-dlp', false, false),
 ];
 

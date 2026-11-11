@@ -7,7 +7,6 @@ import openai from '@/assets/brand/openai.svg';
 import opencode from '@/assets/brand/opencode.svg';
 import node from '@/assets/brand/nodedotjs.svg';
 import ffmpeg from '@/assets/brand/ffmpeg.svg';
-import elevenlabs from '@/assets/brand/elevenlabs.svg';
 import chrome from '@/assets/brand/googlechrome.svg';
 
 const SRC: Partial<Record<AgentId | ToolId, string>> = {
@@ -18,7 +17,6 @@ const SRC: Partial<Record<AgentId | ToolId, string>> = {
   opencode,
   node,
   ffmpeg,
-  'elevenlabs-mcp': elevenlabs,
   chrome,
 };
 
