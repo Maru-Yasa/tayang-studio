@@ -474,16 +474,107 @@ pub fn detect_agents(exec: &dyn Exec) -> Vec<AgentInfo> {
         .collect()
 }
 
-/// True when `~/.claude.json` has an ElevenLabs server at user scope (top-level
-/// `mcpServers`). Local-scope entries under `projects` only work in that one folder, so
-/// they don't count.
-pub fn elevenlabs_in_claude_config(json: &str) -> bool {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
-        return false;
+/// How an agent's config file lists its MCP servers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpFormat {
+    /// JSON (comments allowed) with the servers under this top-level key.
+    Json(&'static str),
+    /// Codex's `config.toml`: one `[mcp_servers.<name>]` table per server.
+    Toml,
+}
+
+/// The user-level files where `agent` keeps its MCP servers, so a server added there works in
+/// every folder. `claude_config` is the Claude Code config folder Tayang runs Claude with,
+/// `engine_config` the config folder of the "Your API" engine.
+pub fn mcp_config_files(
+    agent: AgentId,
+    home: Option<&Path>,
+    claude_config: &Path,
+    engine_config: &Path,
+) -> Vec<(PathBuf, McpFormat)> {
+    let at_home = |rel: &[&str], format: McpFormat| -> Vec<(PathBuf, McpFormat)> {
+        home.map(|h| (rel.iter().fold(h.to_path_buf(), |p, s| p.join(s)), format)).into_iter().collect()
     };
-    v.get("mcpServers")
-        .and_then(|s| s.as_object())
-        .is_some_and(|m| m.keys().any(|k| k.to_ascii_lowercase().contains("elevenlabs")))
+    match agent {
+        // Local-scope entries under `projects` only work in that one folder, so they don't count.
+        AgentId::Claude => vec![(claude_config.join(".claude.json"), McpFormat::Json("mcpServers"))],
+        AgentId::Opencode => ["opencode.json", "opencode.jsonc", "config.json"]
+            .iter()
+            .flat_map(|f| at_home(&[".config", "opencode", f], McpFormat::Json("mcp")))
+            .collect(),
+        AgentId::Custom => ["opencode.json", "opencode.jsonc"]
+            .iter()
+            .map(|f| (engine_config.join(f), McpFormat::Json("mcp")))
+            .collect(),
+        AgentId::Gemini => at_home(&[".gemini", "settings.json"], McpFormat::Json("mcpServers")),
+        AgentId::Antigravity => at_home(&[".gemini", "antigravity", "mcp_config.json"], McpFormat::Json("mcpServers")),
+        AgentId::Codex => at_home(&[".codex", "config.toml"], McpFormat::Toml),
+    }
+}
+
+/// JSON with `//` and `/* */` comments and trailing commas made plain JSON.
+fn strip_jsonc(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            match c {
+                '\\' => out.extend(chars.next()),
+                '"' => in_string = false,
+                _ => {}
+            }
+        } else if c == '"' {
+            in_string = true;
+            out.push(c);
+        } else if c == '/' && chars.peek() == Some(&'/') {
+            for n in chars.by_ref() {
+                if n == '\n' {
+                    out.push(n);
+                    break;
+                }
+            }
+        } else if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            let mut prev = ' ';
+            for n in chars.by_ref() {
+                if prev == '*' && n == '/' {
+                    break;
+                }
+                prev = n;
+            }
+        } else if c == '}' || c == ']' {
+            // Drop a comma left dangling before the closing bracket.
+            let kept = out.trim_end().len();
+            if out[..kept].ends_with(',') {
+                out.replace_range(kept - 1..kept, "");
+            }
+            out.push(c);
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// True when an agent's config file lists an ElevenLabs MCP server.
+pub fn elevenlabs_in_config(text: &str, format: McpFormat) -> bool {
+    let named = |k: &str| k.to_ascii_lowercase().contains("elevenlabs");
+    match format {
+        McpFormat::Json(key) => {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&strip_jsonc(text)) else {
+                return false;
+            };
+            let Some(servers) = v.get(key).and_then(|s| s.as_object()) else {
+                return false;
+            };
+            // OpenCode 2 nests them one level down, under `mcp.servers`.
+            let nested = servers.get("servers").and_then(|s| s.as_object());
+            servers.keys().chain(nested.into_iter().flat_map(|m| m.keys())).any(|k| named(k))
+        }
+        McpFormat::Toml => text.lines().map(str::trim).any(|l| l.starts_with("[mcp_servers.") && named(l)),
+    }
 }
 
 fn chrome_found(exec: &dyn Exec, os: OsKind) -> bool {
@@ -502,8 +593,8 @@ fn chrome_found(exec: &dyn Exec, os: OsKind) -> bool {
     }
 }
 
-/// `claude_config` is the Claude Code config folder Tayang runs Claude with.
-pub fn check_tools(exec: &dyn Exec, agent: AgentId, claude_config: &Path) -> Vec<ToolStatus> {
+/// `mcp_files` are the agent's own MCP config files (see `mcp_config_files`).
+pub fn check_tools(exec: &dyn Exec, mcp_files: &[(PathBuf, McpFormat)]) -> Vec<ToolStatus> {
     let version_of = |bin: &str, arg: &str| -> Option<String> {
         exec.which(bin)?;
         exec.run(bin, &[arg]).and_then(|s| parse_version(&s))
@@ -558,14 +649,9 @@ pub fn check_tools(exec: &dyn Exec, agent: AgentId, claude_config: &Path) -> Vec
         detail: "Lets you copy the style of a video from a link".into(),
     };
 
-    let (el_found, el_detail) = if agent == AgentId::Claude {
-        let found = std::fs::read_to_string(claude_config.join(".claude.json"))
-            .map(|s| elevenlabs_in_claude_config(&s))
-            .unwrap_or(false);
-        (found, "Adds a natural voice to your videos")
-    } else {
-        (false, "Check your agent's MCP settings")
-    };
+    let el_found = mcp_files.iter().any(|(file, format)| {
+        std::fs::read_to_string(file).is_ok_and(|s| elevenlabs_in_config(&s, *format))
+    });
     let elevenlabs = ToolStatus {
         id: ToolId::ElevenlabsMcp,
         name: "ElevenLabs voice".into(),
@@ -573,7 +659,7 @@ pub fn check_tools(exec: &dyn Exec, agent: AgentId, claude_config: &Path) -> Vec
         found: el_found,
         version: None,
         ok: el_found,
-        detail: el_detail.into(),
+        detail: "Adds a natural voice to your videos".into(),
     };
 
     vec![node, ffmpeg, chrome, ytdlp, elevenlabs]
@@ -748,7 +834,7 @@ mod tests {
     #[test]
     fn old_node_is_not_ok() {
         let ex = FakeExec::default().with("node", "v20.11.0");
-        let t = check_tools(&ex, AgentId::Claude, Path::new("/nonexistent"));
+        let t = check_tools(&ex, &[]);
         let n = tool(&t, ToolId::Node);
         assert!(n.found && !n.ok && n.required);
         assert_eq!(n.version.as_deref(), Some("20.11.0"));
@@ -758,14 +844,14 @@ mod tests {
     #[test]
     fn new_node_is_ok() {
         let ex = FakeExec::default().with("node", "v22.1.0");
-        let t = check_tools(&ex, AgentId::Claude, Path::new("/nonexistent"));
+        let t = check_tools(&ex, &[]);
         assert!(tool(&t, ToolId::Node).ok);
     }
 
     #[test]
     fn missing_ffmpeg_is_not_found() {
         let ex = FakeExec::default();
-        let t = check_tools(&ex, AgentId::Claude, Path::new("/nonexistent"));
+        let t = check_tools(&ex, &[]);
         assert_eq!(t.len(), 5);
         let f = tool(&t, ToolId::Ffmpeg);
         assert!(!f.found && !f.ok && f.required && f.version.is_none());
@@ -774,24 +860,63 @@ mod tests {
 
     #[test]
     fn elevenlabs_config_detection() {
-        assert!(elevenlabs_in_claude_config(r#"{"mcpServers":{"elevenlabs":{}}}"#));
-        assert!(elevenlabs_in_claude_config(r#"{"mcpServers":{"my-ElevenLabs-tts":{}}}"#));
+        let claude = McpFormat::Json("mcpServers");
+        assert!(elevenlabs_in_config(r#"{"mcpServers":{"elevenlabs":{}}}"#, claude));
+        assert!(elevenlabs_in_config(r#"{"mcpServers":{"my-ElevenLabs-tts":{}}}"#, claude));
         // Local scope (one folder only) doesn't count.
-        assert!(!elevenlabs_in_claude_config(
-            r#"{"projects":{"/a":{"mcpServers":{"elevenlabs":{}}}}}"#
-        ));
-        assert!(!elevenlabs_in_claude_config("{}"));
-        assert!(!elevenlabs_in_claude_config(r#"{"mcpServers":{"other":{}}}"#));
-        assert!(!elevenlabs_in_claude_config("not json"));
+        assert!(!elevenlabs_in_config(r#"{"projects":{"/a":{"mcpServers":{"elevenlabs":{}}}}}"#, claude));
+        assert!(!elevenlabs_in_config("{}", claude));
+        assert!(!elevenlabs_in_config(r#"{"mcpServers":{"other":{}}}"#, claude));
+        assert!(!elevenlabs_in_config("not json", claude));
     }
 
     #[test]
-    fn non_claude_agent_elevenlabs_hint() {
+    fn elevenlabs_in_opencode_config() {
+        let oc = McpFormat::Json("mcp");
+        // OpenCode 1: servers right under `mcp`. A .jsonc file has comments and trailing commas.
+        let v1 = "{\n  // my servers\n  \"mcp\": {\n    \"elevenlabs\": { \"type\": \"local\", \"command\": [\"uvx\", \"elevenlabs-mcp\",], },\n  }, /* end */\n}";
+        assert!(elevenlabs_in_config(v1, oc));
+        // OpenCode 2 (`opencode mcp add --global`): under `mcp.servers`.
+        assert!(elevenlabs_in_config(r#"{"mcp":{"servers":{"elevenlabs":{"type":"local"}}}}"#, oc));
+        assert!(!elevenlabs_in_config(r#"{"mcp":{"servers":{"exa":{}}}}"#, oc));
+        // "//" inside a string is not a comment.
+        assert!(elevenlabs_in_config(r#"{"$schema":"https://opencode.ai/config.json","mcp":{"elevenlabs":{}}}"#, oc));
+        assert!(!elevenlabs_in_config(r#"{"$schema":"https://opencode.ai/config.json"}"#, oc));
+    }
+
+    #[test]
+    fn elevenlabs_in_codex_config() {
+        let toml = "model = \"gpt\"\n\n[mcp_servers.exa]\nurl = \"x\"\n\n[mcp_servers.elevenlabs]\ncommand = \"uvx\"\n\n[mcp_servers.elevenlabs.env]\nELEVENLABS_API_KEY = \"k\"\n";
+        assert!(elevenlabs_in_config(toml, McpFormat::Toml));
+        assert!(!elevenlabs_in_config("[mcp_servers.exa]\nargs = [\"elevenlabs\"]\n", McpFormat::Toml));
+    }
+
+    /// Every agent finds the server in its own user-level config, not only Claude.
+    #[test]
+    fn elevenlabs_found_for_every_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (home, claude, engine) = (tmp.path().join("home"), tmp.path().join("claude"), tmp.path().join("engine"));
+        let json = r#"{"mcpServers":{"elevenlabs":{"command":"uvx"}}}"#;
+        let opencode = r#"{"mcp":{"elevenlabs":{"type":"local"}}}"#;
+        let cases: [(AgentId, PathBuf, &str); 6] = [
+            (AgentId::Claude, claude.join(".claude.json"), json),
+            (AgentId::Opencode, home.join(".config/opencode/opencode.jsonc"), opencode),
+            (AgentId::Custom, engine.join("opencode.json"), opencode),
+            (AgentId::Gemini, home.join(".gemini/settings.json"), json),
+            (AgentId::Antigravity, home.join(".gemini/antigravity/mcp_config.json"), json),
+            (AgentId::Codex, home.join(".codex/config.toml"), "[mcp_servers.elevenlabs]\ncommand = \"uvx\"\n"),
+        ];
         let ex = FakeExec::default();
-        let t = check_tools(&ex, AgentId::Gemini, Path::new("/nonexistent"));
-        let e = tool(&t, ToolId::ElevenlabsMcp);
-        assert!(!e.found);
-        assert_eq!(e.detail, "Check your agent's MCP settings");
+        let found = |agent| {
+            let files = mcp_config_files(agent, Some(&home), &claude, &engine);
+            tool(&check_tools(&ex, &files), ToolId::ElevenlabsMcp).ok
+        };
+        for (agent, file, text) in cases {
+            assert!(!found(agent), "{agent:?} before");
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, text).unwrap();
+            assert!(found(agent), "{agent:?} after");
+        }
     }
 
     #[test]

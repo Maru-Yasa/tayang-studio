@@ -81,7 +81,9 @@ pub async fn detect_agents(app: AppHandle) -> CmdResult<Vec<AgentInfo>> {
 #[tauri::command]
 pub async fn check_tools(app: AppHandle, agent: AgentId) -> CmdResult<Vec<ToolStatus>> {
     let claude = claude_config_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || system::check_tools(&RealExec, agent, &claude))
+    let engine = crate::api_engine::engine_config_dir(&app.path().app_data_dir().map_err(err)?);
+    let files = system::mcp_config_files(agent, system::home_dir().as_deref(), &claude, &engine);
+    tauri::async_runtime::spawn_blocking(move || system::check_tools(&RealExec, &files))
         .await
         .map_err(err)
 }
