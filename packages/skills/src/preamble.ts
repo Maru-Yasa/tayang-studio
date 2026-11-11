@@ -56,6 +56,8 @@ export interface UserSkill {
   enabled: boolean;
   /** Its SKILL.md on disk. */
   path: string;
+  /** The GitHub link it was added from, when it came from one. */
+  source?: string | null;
 }
 
 /**

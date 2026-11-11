@@ -269,3 +269,24 @@ export const setSkillEnabled = (id: string, enabled: boolean) => invoke<UserSkil
 export const deleteSkill = (id: string) => invoke<void>('skill_delete', { id });
 /** From a SKILL.md file or a folder with one. */
 export const importSkill = (path: string) => invoke<UserSkill>('skill_import', { path });
+
+/** A skill found at a GitHub link, before it's added. */
+export interface FoundSkill {
+  /** Its folder in the repo, '' when SKILL.md is at the top. */
+  folder: string;
+  name: string;
+  description: string;
+  /** Files the agent could run, relative to the skill's folder (the first few). */
+  scripts: string[];
+  scriptCount: number;
+  /** Its folder on GitHub. */
+  source: string;
+}
+export interface SkillDownload {
+  id: string;
+  skills: FoundSkill[];
+}
+export const fetchGithubSkills = (url: string) => invoke<SkillDownload>('skill_github_fetch', { url });
+export const installGithubSkills = (id: string, picks: { folder: string; source: string }[]) =>
+  invoke<{ added: UserSkill[]; failed: string[] }>('skill_github_install', { id, picks });
+export const discardGithubSkills = (id: string) => invoke<void>('skill_github_discard', { id });
