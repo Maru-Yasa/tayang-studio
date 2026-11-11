@@ -1,7 +1,7 @@
 //! "Your API": the user brings only an API key (DeepSeek, 9router, CommandCode or any
 //! OpenAI-compatible address) and Tayang runs a pinned opencode release as the agent behind it.
 //! The user never sees or configures opencode: Tayang downloads it into its app-data folder and
-//! starts `opencode acp` with one provider passed in `OPENCODE_CONFIG_CONTENT`.
+//! starts `opencode acp` with one provider written to a config file (`OPENCODE_CONFIG`).
 //!
 //! The key lives in the OS keychain (see `commands::api_key_store`), the provider, address and
 //! model in Settings (`apiProvider`).
@@ -217,11 +217,21 @@ pub fn opencode_config(p: &ApiProvider) -> Value {
     })
 }
 
-/// The environment the engine runs with: the provider, the key, and opencode kept away from the
-/// user's own opencode setup, its free models, its updates and Claude Code's files.
-pub fn session_env(p: &ApiProvider, key: &str, config_dir: &Path) -> Vec<(String, String)> {
+/// Writes the engine's config next to its config folder and returns the file. It's a file, not an
+/// environment variable: a router like OpenRouter lists hundreds of models, and Windows caps the
+/// whole environment at 32,767 characters, so the engine wouldn't start. The key stays out of it.
+pub fn write_config(engine_root: &Path, p: &ApiProvider) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(engine_root)?;
+    let file = engine_root.join("provider.json");
+    std::fs::write(&file, opencode_config(p).to_string())?;
+    Ok(file)
+}
+
+/// The environment the engine runs with: the provider's config file, the key, and opencode kept
+/// away from the user's own opencode setup, its free models, its updates and Claude Code's files.
+pub fn session_env(config_file: &Path, key: &str, config_dir: &Path) -> Vec<(String, String)> {
     vec![
-        ("OPENCODE_CONFIG_CONTENT".into(), opencode_config(p).to_string()),
+        ("OPENCODE_CONFIG".into(), config_file.to_string_lossy().into_owned()),
         ("OPENCODE_CONFIG_DIR".into(), config_dir.to_string_lossy().into_owned()),
         ("OPENCODE_DISABLE_AUTOUPDATE".into(), "1".into()),
         ("OPENCODE_DISABLE_FREE_MODELS".into(), "1".into()),
@@ -449,13 +459,27 @@ mod tests {
 
     #[test]
     fn the_session_env_isolates_opencode() {
-        let env = session_env(&deepseek(), "sk-1", Path::new("/data/engine/config"));
+        let env = session_env(Path::new("/data/engine/provider.json"), "sk-1", Path::new("/data/engine/config"));
         let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
         assert_eq!(get("TAYANG_PROVIDER_KEY"), Some("sk-1"));
         assert_eq!(get("OPENCODE_CONFIG_DIR"), Some("/data/engine/config"));
         assert_eq!(get("OPENCODE_DISABLE_FREE_MODELS"), Some("1"));
         assert_eq!(get("OPENCODE_DISABLE_AUTOUPDATE"), Some("1"));
-        assert!(get("OPENCODE_CONFIG_CONTENT").unwrap().contains("tayang/deepseek-chat"));
+        assert_eq!(get("OPENCODE_CONFIG"), Some("/data/engine/provider.json"));
+        assert_eq!(get("OPENCODE_CONFIG_CONTENT"), None);
+    }
+
+    #[test]
+    fn a_long_model_list_goes_in_a_file_not_the_environment() {
+        // Windows caps the whole environment at 32,767 characters; OpenRouter lists ~470 models.
+        let dir = tempfile::tempdir().unwrap();
+        let p = ApiProvider { models: (0..2000).map(|i| format!("vendor/model-{i}")).collect(), ..deepseek() };
+        let file = write_config(dir.path(), &p).unwrap();
+        let env = session_env(&file, "sk-1", Path::new("/data/engine/config"));
+        assert!(env.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() < 1000);
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(saved, opencode_config(&p));
+        assert!(!saved.to_string().contains("sk-1"), "the key stays out of the file");
     }
 
     #[test]
