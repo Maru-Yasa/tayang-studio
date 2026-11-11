@@ -2199,8 +2199,10 @@ async fn api_agent(app: &AppHandle) -> CmdResult<(Vec<String>, Vec<(String, Stri
     }
     let config_dir = crate::api_engine::engine_config_dir(&data);
     std::fs::create_dir_all(&config_dir).map_err(err)?;
+    let data_dir = crate::api_engine::engine_data_dir(&data);
+    std::fs::create_dir_all(&data_dir).map_err(err)?;
     let command = vec![engine.to_string_lossy().into_owned(), "acp".into()];
-    Ok((command, crate::api_engine::session_env(&provider, &key, &config_dir)))
+    Ok((command, crate::api_engine::session_env(&provider, &key, &config_dir, &data_dir)))
 }
 
 /// The command that starts `agent_id` on this computer, plus any environment of its own.
