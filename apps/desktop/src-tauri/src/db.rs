@@ -343,8 +343,6 @@ impl Db {
             "projectStatusChecked": false,
             "agentModels": {},
             "voiceSource": "tayang",
-            "elevenVoiceId": null,
-            "fishVoiceId": null,
         })
     }
 

@@ -481,12 +481,6 @@ pub struct Settings {
     /// Where voice-overs come from. API keys are in the keychain.
     #[serde(default)]
     pub voice_source: VoiceSource,
-    /// The ElevenLabs voice to speak with (a voice id from the user's account); none: a default voice.
-    #[serde(default)]
-    pub eleven_voice_id: Option<String>,
-    /// The Fish Audio voice to speak with (a voice's id on fish.audio); none: its default voice.
-    #[serde(default)]
-    pub fish_voice_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

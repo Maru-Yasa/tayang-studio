@@ -1043,12 +1043,7 @@ pub async fn start_ai_proxy(handle: AppHandle) {
                         (Some(account), Some(keys)) => keys.get_account(account).await.ok().flatten(),
                         _ => None,
                     };
-                    let voice_id = match source {
-                        crate::types::VoiceSource::Elevenlabs => settings.eleven_voice_id.clone(),
-                        crate::types::VoiceSource::Fishaudio => settings.fish_voice_id.clone(),
-                        _ => None,
-                    };
-                    let setup = crate::voice::VoiceSetup { source, key, voice_id, base: source.base().into() };
+                    let setup = crate::voice::VoiceSetup { source, key, base: source.base().into() };
                     return crate::voice::speak(auth.client(), &setup, text, language.as_deref(), out, &folder).await;
                 }
                 if job == crate::ai_proxy::AiJob::Usage {
@@ -2248,14 +2243,10 @@ pub struct VoiceStatus {
     has_fish_key: bool,
 }
 
-/// The keychain account and the Settings key of the voice id, for a source that has an API key.
-fn voice_key_source(source: crate::types::VoiceSource) -> CmdResult<(&'static str, &'static str, &'static str)> {
-    use crate::types::VoiceSource::*;
+/// The keychain account of a source that has an API key, and its name in Settings.
+fn voice_key_source(source: crate::types::VoiceSource) -> CmdResult<(&'static str, &'static str)> {
     let account = source.key_account().ok_or("That voice source has no API key")?;
-    Ok(match source {
-        Elevenlabs => (account, "elevenlabs", "elevenVoiceId"),
-        _ => (account, "fishaudio", "fishVoiceId"),
-    })
+    Ok((account, if source == crate::types::VoiceSource::Elevenlabs { "elevenlabs" } else { "fishaudio" }))
 }
 
 #[tauri::command]
@@ -2269,17 +2260,16 @@ pub async fn voice_status(keys: State<'_, ApiKeys>) -> CmdResult<VoiceStatus> {
     Ok(VoiceStatus { has_eleven_key: saved[0], has_fish_key: saved[1] })
 }
 
-/// Checks the source's API key (no `key`: the saved one) and, when it is good, saves it with the
-/// voice id and makes that source the voice source. A refused key changes nothing.
+/// Checks the source's API key (no `key`: the saved one) and, when it is good, saves it and makes
+/// that source the voice source. A refused key changes nothing.
 #[tauri::command]
 pub async fn voice_key_save(
     state: State<'_, AppState>,
     keys: State<'_, ApiKeys>,
     source: crate::types::VoiceSource,
     key: Option<String>,
-    voice_id: Option<String>,
 ) -> CmdResult<(crate::voice::VoiceCheck, Settings)> {
-    let (account, name, voice_key) = voice_key_source(source)?;
+    let (account, name) = voice_key_source(source)?;
     let typed = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
     let key = match &typed {
         Some(k) => k.clone(),
@@ -2293,24 +2283,20 @@ pub async fn voice_key_save(
     if let Some(k) = typed {
         keys.set_account(account, k).await?;
     }
-    let voice_id = voice_id.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-    let mut patch = serde_json::json!({ "voiceSource": name });
-    patch[voice_key] = serde_json::json!(voice_id);
-    let settings = state.db.update_settings(patch).map_err(err)?;
+    let settings = state.db.update_settings(serde_json::json!({ "voiceSource": name })).map_err(err)?;
     Ok((check, settings))
 }
 
 /// Forgets the source's API key; the voice source goes back to Tayang when it was that source.
 #[tauri::command]
 pub async fn voice_key_clear(state: State<'_, AppState>, keys: State<'_, ApiKeys>, source: crate::types::VoiceSource) -> CmdResult<Settings> {
-    let (account, _, voice_key) = voice_key_source(source)?;
+    let (account, _) = voice_key_source(source)?;
     keys.delete_account(account).await?;
-    let mut patch = serde_json::json!({});
-    patch[voice_key] = serde_json::Value::Null;
-    if state.db.get_settings(&state.home).voice_source == source {
-        patch["voiceSource"] = serde_json::json!("tayang");
+    let settings = state.db.get_settings(&state.home);
+    if settings.voice_source != source {
+        return Ok(settings);
     }
-    state.db.update_settings(patch).map_err(err)
+    state.db.update_settings(serde_json::json!({ "voiceSource": "tayang" })).map_err(err)
 }
 
 /// Whether VoiceStudio is open on this computer.

@@ -14,8 +14,8 @@ use crate::types::VoiceSource;
 pub const ELEVEN_BASE: &str = "https://api.elevenlabs.io";
 /// Speaks Indonesian and 28 other languages.
 const ELEVEN_MODEL: &str = "eleven_multilingual_v2";
-/// "George", a voice every ElevenLabs account has, for when Settings names none.
-const ELEVEN_DEFAULT_VOICE: &str = "JBFqnCBsd6RMkjVDRZzb";
+/// "George", a voice every ElevenLabs account has.
+const ELEVEN_VOICE: &str = "JBFqnCBsd6RMkjVDRZzb";
 pub const FISH_BASE: &str = "https://api.fish.audio";
 /// VoiceStudio's local API, up while the app is open.
 pub const VOICESTUDIO_BASE: &str = "http://127.0.0.1:3900";
@@ -64,8 +64,6 @@ pub enum VoiceError {
     BadKey,
     /// The account's credit or quota is used up.
     NoBalance,
-    /// The voice id in Settings doesn't exist.
-    BadVoice,
     /// Nothing answers at VoiceStudio's address: the app isn't open.
     NotRunning,
     TooLong,
@@ -82,7 +80,6 @@ impl VoiceError {
             Self::NoKey => "no-key",
             Self::BadKey => "bad-key",
             Self::NoBalance => "no-balance",
-            Self::BadVoice => "bad-voice",
             Self::NotRunning => "not-running",
             Self::TooLong => "too-long",
             Self::Busy => "busy",
@@ -97,7 +94,6 @@ impl VoiceError {
             Self::NoKey => (401, format!("The user picked {name} for voice but saved no API key: {FALLBACK} to add the key in Settings › Video")),
             Self::BadKey => (401, format!("The user's {name} API key was refused: {FALLBACK} to check the key in Settings › Video")),
             Self::NoBalance => (402, format!("The user's {name} account has no credit left: {FALLBACK}")),
-            Self::BadVoice => (400, format!("The {name} voice id in Settings › Video doesn't exist: {FALLBACK} to fix the voice id")),
             Self::NotRunning => (503, format!("{name} isn't open on this computer: {FALLBACK} to open {name} for its voice")),
             Self::TooLong => (400, "That text is too long for one call: split the narration into parts under 4000 characters, one /voice call each".to_string()),
             Self::Busy => (429, "The voice provider is busy: wait a few seconds and try once more".to_string()),
@@ -133,16 +129,13 @@ async fn fish_call(client: &reqwest::Client, base: &str, key: &str, model: &str,
         .map_err(|_| VoiceError::Failed)
 }
 
-/// Speech from Fish Audio as mp3. `voice_id` is a voice from fish.audio (its `reference_id`); none
-/// is Fish Audio's default voice. An account with no API credit gets the free model.
-pub async fn fish_speak(client: &reqwest::Client, base: &str, key: &str, text: &str, voice_id: Option<&str>, language: Option<&str>) -> Result<Vec<u8>, VoiceError> {
+/// Speech from Fish Audio as mp3, in its default voice. An account with no API credit gets the
+/// free model.
+pub async fn fish_speak(client: &reqwest::Client, base: &str, key: &str, text: &str, language: Option<&str>) -> Result<Vec<u8>, VoiceError> {
     if key.is_empty() {
         return Err(VoiceError::NoKey);
     }
     let mut body = json!({ "text": text, "format": "mp3" });
-    if let Some(v) = voice_id.filter(|v| !v.is_empty()) {
-        body["reference_id"] = json!(v);
-    }
     if let Some(l) = language.filter(|l| !l.is_empty()) {
         body["language"] = json!(l);
     }
@@ -154,7 +147,6 @@ pub async fn fish_speak(client: &reqwest::Client, base: &str, key: &str, text: &
         200..=299 => audio(res).await,
         401 | 403 => Err(VoiceError::BadKey),
         402 => Err(VoiceError::NoBalance),
-        400 | 404 if voice_id.is_some_and(|v| !v.is_empty()) => Err(VoiceError::BadVoice),
         429 => Err(VoiceError::Busy),
         _ => Err(VoiceError::Failed),
     }
@@ -166,32 +158,24 @@ async fn eleven_error(res: reqwest::Response) -> VoiceError {
     let body = res.bytes().await.ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
     match body.pointer("/detail/status").and_then(Value::as_str).unwrap_or("") {
         "quota_exceeded" => VoiceError::NoBalance,
-        "voice_not_found" => VoiceError::BadVoice,
         "invalid_api_key" | "needs_authorization" | "missing_permissions" => VoiceError::BadKey,
         "too_many_concurrent_requests" | "system_busy" => VoiceError::Busy,
         _ => match status {
             401 | 403 => VoiceError::BadKey,
             402 => VoiceError::NoBalance,
-            404 => VoiceError::BadVoice,
             429 => VoiceError::Busy,
             _ => VoiceError::Failed,
         },
     }
 }
 
-/// Speech from ElevenLabs as mp3. `voice_id` is a voice from the user's ElevenLabs account; none
-/// is the default voice every account has.
-pub async fn eleven_speak(client: &reqwest::Client, base: &str, key: &str, text: &str, voice_id: Option<&str>) -> Result<Vec<u8>, VoiceError> {
+/// Speech from ElevenLabs as mp3, in the default voice every account has.
+pub async fn eleven_speak(client: &reqwest::Client, base: &str, key: &str, text: &str) -> Result<Vec<u8>, VoiceError> {
     if key.is_empty() {
         return Err(VoiceError::NoKey);
     }
-    let voice = voice_id.filter(|v| !v.is_empty()).unwrap_or(ELEVEN_DEFAULT_VOICE);
-    // A voice id is letters and digits; anything else would change the address.
-    if !voice.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err(VoiceError::BadVoice);
-    }
     let res = client
-        .post(format!("{base}/v1/text-to-speech/{voice}?output_format=mp3_44100_128"))
+        .post(format!("{base}/v1/text-to-speech/{ELEVEN_VOICE}?output_format=mp3_44100_128"))
         .header("xi-api-key", key)
         .header("content-type", "application/json")
         .timeout(Duration::from_secs(180))
@@ -237,7 +221,6 @@ pub struct VoiceSetup {
     pub source: VoiceSource,
     /// The source's API key; VoiceStudio has none.
     pub key: Option<String>,
-    pub voice_id: Option<String>,
     pub base: String,
 }
 
@@ -245,11 +228,10 @@ pub struct VoiceSetup {
 /// like Tayang's own voice does, with no credits charged.
 pub async fn speak(client: &reqwest::Client, setup: &VoiceSetup, text: &str, language: Option<&str>, out: &Path, folder: &Path) -> Result<Value, (u16, Value)> {
     let key = setup.key.as_deref().unwrap_or("");
-    let voice = setup.voice_id.as_deref();
     let name = setup.source.name();
     let bytes = match setup.source {
-        VoiceSource::Elevenlabs => eleven_speak(client, &setup.base, key, text, voice).await,
-        VoiceSource::Fishaudio => fish_speak(client, &setup.base, key, text, voice, language).await,
+        VoiceSource::Elevenlabs => eleven_speak(client, &setup.base, key, text).await,
+        VoiceSource::Fishaudio => fish_speak(client, &setup.base, key, text, language).await,
         VoiceSource::Voicestudio => voicestudio_speak(client, &setup.base, text, language).await,
         VoiceSource::Tayang => Err(VoiceError::Failed),
     }
@@ -384,7 +366,7 @@ mod tests {
     use crate::auth::tests::{dead_base, fake};
 
     fn setup(source: VoiceSource, base: &str) -> VoiceSetup {
-        VoiceSetup { source, key: Some("fk-1".into()), voice_id: Some("voice9".into()), base: base.to_string() }
+        VoiceSetup { source, key: Some("fk-1".into()), base: base.to_string() }
     }
 
     #[tokio::test]
@@ -399,17 +381,17 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].auth.as_deref(), Some("Bearer fk-1"));
         let sent: Value = serde_json::from_str(&hits[0].body).unwrap();
-        assert_eq!(sent, json!({ "text": "Halo dunia", "format": "mp3", "reference_id": "voice9", "language": "id" }));
+        assert_eq!(sent, json!({ "text": "Halo dunia", "format": "mp3", "language": "id" }));
     }
 
     #[tokio::test]
     async fn fish_audio_without_credit_falls_back_to_the_free_model() {
         // The paid model answers 402 first; the second call is the free model.
         let f = fake(|_, nth| if nth == 0 { (402, r#"{"message":"no credit","status":402}"#.into()) } else { (200, "ID3".into()) }).await;
-        let got = fish_speak(&http_client().unwrap(), &f.base, "fk-1", "Halo", None, None).await;
+        let got = fish_speak(&http_client().unwrap(), &f.base, "fk-1", "Halo", None).await;
         assert_eq!(got, Ok(b"ID3".to_vec()));
         assert_eq!(f.hits("/api/v1/tts").len(), 2);
-        // No voice id: none is sent, so Fish Audio picks its default.
+        // No language asked: none is sent.
         let sent: Value = serde_json::from_str(&f.hits("/api/v1/tts")[0].body).unwrap();
         assert_eq!(sent, json!({ "text": "Halo", "format": "mp3" }));
     }
@@ -417,17 +399,16 @@ mod tests {
     #[tokio::test]
     async fn fish_audio_refusals_tell_the_agent_what_to_do() {
         let client = http_client().unwrap();
-        assert_eq!(fish_speak(&client, "http://unused", "", "Halo", None, None).await, Err(VoiceError::NoKey));
-        for (status, voice, want) in [
-            (401, None, VoiceError::BadKey),
-            (402, None, VoiceError::NoBalance),
-            (404, Some("gone"), VoiceError::BadVoice),
-            (400, None, VoiceError::Failed),
-            (429, None, VoiceError::Busy),
-            (500, None, VoiceError::Failed),
+        assert_eq!(fish_speak(&client, "http://unused", "", "Halo", None).await, Err(VoiceError::NoKey));
+        for (status, want) in [
+            (401, VoiceError::BadKey),
+            (402, VoiceError::NoBalance),
+            (400, VoiceError::Failed),
+            (429, VoiceError::Busy),
+            (500, VoiceError::Failed),
         ] {
             let f = fake(move |_, _| (status, "{}".into())).await;
-            assert_eq!(fish_speak(&client, &f.base, "fk-1", "Halo", voice, None).await, Err(want), "{status}");
+            assert_eq!(fish_speak(&client, &f.base, "fk-1", "Halo", None).await, Err(want), "{status}");
         }
         let (status, body) = VoiceError::BadKey.refusal("Fish Audio");
         assert_eq!((status, body["error"].as_str()), (401, Some("bad-key")));
@@ -481,39 +462,31 @@ mod tests {
     async fn elevenlabs_speaks_with_the_users_key_and_voice() {
         let f = fake(|_, _| (200, "ID3-eleven".into())).await;
         let dir = tempfile::tempdir().unwrap();
-        let s = VoiceSetup { source: VoiceSource::Elevenlabs, key: Some("sk_1".into()), voice_id: Some("Voice123".into()), base: f.base.clone() };
+        let s = VoiceSetup { source: VoiceSource::Elevenlabs, key: Some("sk_1".into()), base: f.base.clone() };
         let answer = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
         assert_eq!(answer["files"], json!(["audio/intro.mp3"]));
         assert_eq!(std::fs::read(dir.path().join("audio/intro.mp3")).unwrap(), b"ID3-eleven");
-        let hits = f.hits("/api/v1/text-to-speech/Voice123?output_format=mp3_44100_128");
+        let hits = f.hits("/api/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb?output_format=mp3_44100_128");
         assert_eq!(hits.len(), 1);
-        // The key goes in ElevenLabs' own header, and the multilingual model takes no language.
+        // The default voice, the key in ElevenLabs' own header, and the multilingual model takes no language.
         assert_eq!(hits[0].auth, None);
         let sent: Value = serde_json::from_str(&hits[0].body).unwrap();
         assert_eq!(sent, json!({ "text": "Halo dunia", "model_id": "eleven_multilingual_v2" }));
-
-        // No voice in Settings: the default voice every account has.
-        let got = eleven_speak(&http_client().unwrap(), &f.base, "sk_1", "Halo", None).await;
-        assert_eq!(got, Ok(b"ID3-eleven".to_vec()));
-        assert_eq!(f.hits("/api/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb?output_format=mp3_44100_128").len(), 1);
     }
 
     #[tokio::test]
     async fn elevenlabs_refusals_are_read_from_its_answer() {
         let client = http_client().unwrap();
-        assert_eq!(eleven_speak(&client, "http://unused", "", "Halo", None).await, Err(VoiceError::NoKey));
-        // A voice id can't carry a path or a query.
-        assert_eq!(eleven_speak(&client, "http://unused", "sk_1", "Halo", Some("a/b?x=1")).await, Err(VoiceError::BadVoice));
+        assert_eq!(eleven_speak(&client, "http://unused", "", "Halo").await, Err(VoiceError::NoKey));
         for (status, detail, want) in [
             (401, "invalid_api_key", VoiceError::BadKey),
             (401, "quota_exceeded", VoiceError::NoBalance),
             (401, "missing_permissions", VoiceError::BadKey),
-            (400, "voice_not_found", VoiceError::BadVoice),
             (429, "too_many_concurrent_requests", VoiceError::Busy),
             (500, "", VoiceError::Failed),
         ] {
             let f = fake(move |_, _| (status, format!(r#"{{"detail":{{"status":"{detail}","message":"x"}}}}"#))).await;
-            assert_eq!(eleven_speak(&client, &f.base, "sk_1", "Halo", None).await, Err(want), "{status} {detail}");
+            assert_eq!(eleven_speak(&client, &f.base, "sk_1", "Halo").await, Err(want), "{status} {detail}");
         }
         let (status, body) = VoiceError::NoBalance.refusal("ElevenLabs");
         assert_eq!(status, 402);
