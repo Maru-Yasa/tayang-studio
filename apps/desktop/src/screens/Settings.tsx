@@ -13,6 +13,7 @@ import { AgentLogo } from '@/components/AgentLogo';
 import { ApiSetupDialog } from '@/components/ApiSetupDialog';
 import { Button } from '@/components/Button';
 import { ToolRow, TOOL_ORDER } from '@/components/ToolRow';
+import { VoiceSourceCard } from '@/components/VoiceSourceCard';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
@@ -515,11 +516,8 @@ export function Settings() {
                   onChange={(v) => void save({ fps: Number(v) })}
                 />
               </Row>
-              <Row label={t('settings.voiceover')}>
-                <span className="text-xs text-text-3">{t('settings.withPlan')}</span>
-                <span className="text-sm text-[#D9D9D9]">{t('settings.off')}</span>
-              </Row>
             </Card>
+            <VoiceSourceCard settings={settings} onSaved={setSettings} />
           </section>
         )}
 

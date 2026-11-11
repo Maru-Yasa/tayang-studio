@@ -28,6 +28,8 @@ import type {
   Style,
   SystemInfo,
   ToolStatus,
+  VoiceCheck,
+  VoiceStatus,
   QuestionResponse,
 } from '@tayang/shared';
 
@@ -45,6 +47,15 @@ export const apiCheck = (baseUrl: string, key: string | null) => invoke<ApiCheck
 /** One real one-token call with `model` before saving; no `key` uses the saved one. */
 export const apiTry = (baseUrl: string, key: string | null, model: string) => invoke<ApiCheck>('api_try', { baseUrl, key, model });
 export const apiReachable = (baseUrl: string) => invoke<boolean>('api_reachable', { baseUrl });
+/** Whether a Fish Audio key is saved (the key itself never leaves Rust). */
+export const voiceStatus = () => invoke<VoiceStatus>('voice_status');
+/** Checks the Fish Audio key (null: the saved one); a good one is saved and Fish Audio becomes the voice source. */
+export const voiceFishSave = (key: string | null, voiceId: string | null) =>
+  invoke<[VoiceCheck, Settings]>('voice_fish_save', { key, voiceId });
+/** Forgets the Fish Audio key; the voice source goes back to Tayang when it was Fish Audio. */
+export const voiceFishClear = () => invoke<Settings>('voice_fish_clear');
+/** Whether VoiceStudio is open on this computer. */
+export const voiceStudioCheck = () => invoke<VoiceCheck>('voice_studio_check');
 /** Saves the provider (and the key, when given) and makes Your API the default agent. */
 export const apiSave = (provider: ApiProvider, key: string | null) => invoke<Settings>('api_save', { provider, key });
 export const apiClear = () => invoke<Settings>('api_clear');
