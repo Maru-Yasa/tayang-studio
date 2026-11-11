@@ -11,6 +11,14 @@ vi.mock('@/lib/ipc', () => ({
   voiceStudioCheck: vi.fn(),
 }));
 
+const navigate = vi.fn();
+const plan = vi.hoisted(() => ({ signedIn: true, status: { active: true, plan: 'creator' } as { active: boolean; plan: string } | null }));
+vi.mock('@/state/app', () => ({ useApp: (pick: (s: unknown) => unknown) => pick({ navigate }) }));
+vi.mock('@/state/auth', () => ({ useAuth: (pick: (s: unknown) => unknown) => pick({ status: { signedIn: plan.signedIn } }) }));
+vi.mock('@/state/billing', () => ({
+  useBilling: Object.assign(() => ({ status: plan.status, loadedAt: 1, failed: false }), { getState: () => ({ refresh: vi.fn() }) }),
+}));
+
 import * as ipc from '@/lib/ipc';
 import { VoiceSourceCard } from '@/components/VoiceSourceCard';
 
@@ -25,6 +33,8 @@ const pick = async (user: UserEvent, name: string) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  plan.signedIn = true;
+  plan.status = { active: true, plan: 'creator' };
   vi.mocked(ipc.voiceStatus).mockResolvedValue({ hasElevenKey: false, hasFishKey: false });
   vi.mocked(ipc.updateSettings).mockImplementation(async (patch) => ({ ...base, ...patch }) as Settings);
 });
@@ -42,6 +52,22 @@ describe('VoiceSourceCard', () => {
     // Only the one in use carries the check.
     expect(within(items[0]!).getByTestId('voice-check')).toBeTruthy();
     expect(screen.getAllByTestId('voice-check')).toHaveLength(1);
+  });
+
+  it('without a plan that has voiceovers, Tayang offers the plans', async () => {
+    plan.status = { active: false, plan: 'free' };
+    const { unmount } = render(<VoiceSourceCard settings={base} onSaved={() => {}} />);
+    const user = userEvent.setup();
+    expect(screen.getByText("Tayang's voice comes with the Creator plan and above. Without a plan, your videos use a free voice from this computer.")).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'See plans' }));
+    expect(navigate).toHaveBeenCalledWith({ name: 'plans', plan: 'creator' });
+    unmount();
+
+    // Signed out is the same offer; a subscriber never sees it.
+    plan.signedIn = false;
+    plan.status = null;
+    render(<VoiceSourceCard settings={base} onSaved={() => {}} />);
+    expect(screen.getByRole('button', { name: 'See plans' })).toBeTruthy();
   });
 
   it('Fish Audio is in use only once a key is checked and saved', async () => {

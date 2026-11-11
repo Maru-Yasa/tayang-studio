@@ -1202,6 +1202,7 @@ export const id: Translations = {
     source: 'Sumber suara',
     sourceHint: 'Siapa yang mengisi voiceover videomu',
     tayangText: 'Voiceover dibuat dengan kredit Tayang-mu, sekitar 7 kredit per menit.',
+    tayangNoPlan: 'Suara Tayang ada di paket {{plan}} ke atas. Tanpa paket, videomu memakai suara gratis dari komputer ini.',
     keyText: 'Pakai akun {{name}}-mu sendiri. Voiceover tidak memotong kredit Tayang, dan key-mu disimpan di komputer ini saja.',
     keyLabel: 'API key {{name}}',
     getKey: 'Dapatkan key',

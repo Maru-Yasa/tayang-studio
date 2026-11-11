@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown, RefreshCw } from 'lucide-react';
-import type { Settings, VoiceCheck, VoiceErrorCode, VoiceKeySource, VoiceSource } from '@tayang/shared';
+import { findPlan, type Settings, type VoiceCheck, type VoiceErrorCode, type VoiceKeySource, type VoiceSource } from '@tayang/shared';
 import elevenlabs from '@/assets/brand/elevenlabs.svg';
 import fishaudio from '@/assets/brand/fishaudio.svg';
 import tayang from '@/assets/brand/oyen-symbol-color.svg';
 import voicestudio from '@/assets/brand/voicestudio.svg';
 import { Button } from '@/components/Button';
+import { lacksVoice } from '@/components/UpgradeCard';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { updateSettings, voiceKeyClear, voiceKeySave, voiceStatus, voiceStudioCheck } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
+import { useApp } from '@/state/app';
+import { useAuth } from '@/state/auth';
+import { useBilling } from '@/state/billing';
 
 const VOICESTUDIO_URL = 'https://voicestudio.sh';
 
@@ -49,6 +53,35 @@ function Status({ ok, children }: { ok: boolean; children: string }) {
 }
 
 const linkClass = 'text-xs text-primary hover:text-accent-hover';
+
+/** The cheapest plan with Tayang's voice-overs. */
+const VOICE_PLAN = 'creator' as const;
+
+/** Tayang's own voice: what it costs, or, without a plan that has it, where to get one. */
+function TayangPanel() {
+  const { t } = useTranslation();
+  const navigate = useApp((s) => s.navigate);
+  const signedIn = useAuth((s) => !!s.status?.signedIn);
+  const { status, loadedAt, failed } = useBilling();
+
+  // Signed in with no plan state yet: ask, so a subscriber never sees the offer.
+  useEffect(() => {
+    if (signedIn && loadedAt === 0 && !failed) void useBilling.getState().refresh();
+  }, [signedIn, loadedAt, failed]);
+
+  const known = !signedIn || (loadedAt > 0 && !failed);
+  if (!known || !lacksVoice(signedIn ? status : null)) {
+    return <span className="text-[13px] text-text-2">{t('voice.tayangText')}</span>;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <span className="min-w-60 flex-1 text-[13px] text-text-2">{t('voice.tayangNoPlan', { plan: findPlan(VOICE_PLAN)?.name ?? '' })}</span>
+      <Button className="h-9 px-3 text-[13px]" onClick={() => navigate({ name: 'plans', plan: VOICE_PLAN })}>
+        {t('upgradeCard.cta')}
+      </Button>
+    </div>
+  );
+}
 
 /** ElevenLabs or Fish Audio: the API key, and what trying it said. */
 function KeyPanel({ source, active, inUse, hasKey, onHasKey, onSaved }: {
@@ -231,7 +264,7 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
       </div>
 
       <div className="flex flex-col gap-3 border-t border-[#222] px-4 py-3">
-        {shown === 'tayang' && <span className="text-[13px] text-text-2">{t('voice.tayangText')}</span>}
+        {shown === 'tayang' && <TayangPanel />}
 
         {isKeySource(shown) && (
           <KeyPanel

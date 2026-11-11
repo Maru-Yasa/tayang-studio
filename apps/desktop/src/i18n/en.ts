@@ -1208,6 +1208,7 @@ export const en = {
     source: 'Voice source',
     sourceHint: 'Who speaks the voiceover in your videos',
     tayangText: 'Voiceovers are made with your Tayang credits, about 7 credits a minute.',
+    tayangNoPlan: "Tayang's voice comes with the {{plan}} plan and above. Without a plan, your videos use a free voice from this computer.",
     keyText: 'Use your own {{name}} account. Voiceovers cost no Tayang credits, and your key stays on this computer.',
     keyLabel: '{{name}} API key',
     getKey: 'Get a key',
