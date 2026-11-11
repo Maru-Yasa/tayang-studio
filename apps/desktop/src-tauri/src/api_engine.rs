@@ -228,11 +228,12 @@ pub fn write_config(engine_root: &Path, p: &ApiProvider) -> std::io::Result<Path
 }
 
 /// The environment the engine runs with: the provider's config file, the key, and opencode kept
-/// away from the user's own opencode setup, its free models, its updates and Claude Code's files.
-pub fn session_env(config_file: &Path, key: &str, config_dir: &Path) -> Vec<(String, String)> {
+/// away from the user's own config, database, free models, updates and Claude Code files.
+pub fn session_env(config_file: &Path, key: &str, config_dir: &Path, data_dir: &Path) -> Vec<(String, String)> {
     vec![
         ("OPENCODE_CONFIG".into(), config_file.to_string_lossy().into_owned()),
         ("OPENCODE_CONFIG_DIR".into(), config_dir.to_string_lossy().into_owned()),
+        ("XDG_DATA_HOME".into(), data_dir.to_string_lossy().into_owned()),
         ("OPENCODE_DISABLE_AUTOUPDATE".into(), "1".into()),
         ("OPENCODE_DISABLE_FREE_MODELS".into(), "1".into()),
         ("OPENCODE_DISABLE_CLAUDE_CODE".into(), "1".into()),
@@ -277,6 +278,10 @@ pub fn engine_root(data_dir: &Path) -> PathBuf {
 /// opencode's own config folder for Tayang's sessions (empty: the config comes in the env).
 pub fn engine_config_dir(data_dir: &Path) -> PathBuf {
     engine_root(data_dir).join("config")
+}
+
+pub fn engine_data_dir(data_dir: &Path) -> PathBuf {
+    engine_root(data_dir).join("data")
 }
 
 pub fn engine_binary(data_dir: &Path) -> PathBuf {
@@ -459,10 +464,16 @@ mod tests {
 
     #[test]
     fn the_session_env_isolates_opencode() {
-        let env = session_env(Path::new("/data/engine/provider.json"), "sk-1", Path::new("/data/engine/config"));
+    let env = session_env(
+        Path::new("/data/engine/provider.json"),
+        "sk-1",
+        Path::new("/data/engine/config"),
+        Path::new("/data/engine/data"),
+    );
         let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
         assert_eq!(get("TAYANG_PROVIDER_KEY"), Some("sk-1"));
         assert_eq!(get("OPENCODE_CONFIG_DIR"), Some("/data/engine/config"));
+        assert_eq!(get("XDG_DATA_HOME"), Some("/data/engine/data"));
         assert_eq!(get("OPENCODE_DISABLE_FREE_MODELS"), Some("1"));
         assert_eq!(get("OPENCODE_DISABLE_AUTOUPDATE"), Some("1"));
         assert_eq!(get("OPENCODE_CONFIG"), Some("/data/engine/provider.json"));
@@ -475,7 +486,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = ApiProvider { models: (0..2000).map(|i| format!("vendor/model-{i}")).collect(), ..deepseek() };
         let file = write_config(dir.path(), &p).unwrap();
-        let env = session_env(&file, "sk-1", Path::new("/data/engine/config"));
+        let env = session_env(&file, "sk-1", Path::new("/data/engine/config"), Path::new("/data/engine/data"));
         assert!(env.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() < 1000);
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(saved, opencode_config(&p));
