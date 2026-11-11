@@ -45,6 +45,8 @@ pub fn run() {
             });
         })
         .setup(|app| {
+            // The login shell's PATH takes a moment to read; start before the first tool check needs it.
+            std::thread::spawn(system::shell_path);
             let home = app.path().home_dir()?;
             let data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data)?;
