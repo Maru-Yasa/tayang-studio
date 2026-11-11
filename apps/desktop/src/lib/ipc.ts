@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import type { UserSkill } from '@tayang/skills';
 import type {
   AgentId,
   ApiCheck,
@@ -251,3 +252,41 @@ export const agentModels = (agentId: AgentId) => invoke<AgentModels | null>('age
 /** Picks the agent's model (null: its own default); a running session of `chatId` switches now. */
 export const setAgentModel = (agentId: AgentId, model: string | null, chatId: string | null) =>
   invoke<Settings>('set_agent_model', { agentId, model, chatId });
+
+// ---- the user's own skills (Skills screen) ----
+
+export interface SkillDetail {
+  skill: UserSkill;
+  /** SKILL.md without its frontmatter. */
+  body: string;
+}
+export const listSkills = () => invoke<UserSkill[]>('skills_list');
+export const readSkill = (id: string) => invoke<SkillDetail>('skill_read', { id });
+/** A new skill without `id`; otherwise saves that skill's description and instructions. */
+export const saveSkill = (input: { id?: string; name: string; description: string; body: string }) =>
+  invoke<UserSkill>('skill_save', { id: input.id ?? null, name: input.name, description: input.description, body: input.body });
+export const setSkillEnabled = (id: string, enabled: boolean) => invoke<UserSkill>('skill_set_enabled', { id, enabled });
+export const deleteSkill = (id: string) => invoke<void>('skill_delete', { id });
+/** From a SKILL.md file or a folder with one. */
+export const importSkill = (path: string) => invoke<UserSkill>('skill_import', { path });
+
+/** A skill found at a GitHub link, before it's added. */
+export interface FoundSkill {
+  /** Its folder in the repo, '' when SKILL.md is at the top. */
+  folder: string;
+  name: string;
+  description: string;
+  /** Files the agent could run, relative to the skill's folder (the first few). */
+  scripts: string[];
+  scriptCount: number;
+  /** Its folder on GitHub. */
+  source: string;
+}
+export interface SkillDownload {
+  id: string;
+  skills: FoundSkill[];
+}
+export const fetchGithubSkills = (url: string) => invoke<SkillDownload>('skill_github_fetch', { url });
+export const installGithubSkills = (id: string, picks: { folder: string; source: string }[]) =>
+  invoke<{ added: UserSkill[]; failed: string[] }>('skill_github_install', { id, picks });
+export const discardGithubSkills = (id: string) => invoke<void>('skill_github_discard', { id });

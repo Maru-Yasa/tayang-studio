@@ -29,6 +29,8 @@ export type Route =
       draft?: Record<string, unknown>;
     }
   | { name: 'agents' }
+  /** The skills agents use: the built-in one and the user's own. */
+  | { name: 'skills' }
   | { name: 'calendar' }
   | { name: 'settings'; /** The tab to open on (Settings' own id). */ tab?: string }
   /** Full window, like onboarding. `from` is where Back returns to; `plan` is picked first. */

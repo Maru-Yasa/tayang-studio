@@ -25,6 +25,7 @@ import { Calendar } from '@/screens/Calendar';
 import { ChatRoute, useSoloChat } from '@/screens/ChatRoute';
 import { Plans } from '@/screens/Plans';
 import { Settings } from '@/screens/Settings';
+import { Skills } from '@/screens/Skills';
 import { Style } from '@/screens/Style';
 import { Videos } from '@/screens/Videos';
 import { Social } from '@/screens/Social';
@@ -47,6 +48,7 @@ const SIDEBAR_KEY: Partial<Record<Route['name'], SidebarKey>> = {
   autopilot: 'autopilot',
   'autopilot-wizard': 'autopilot',
   agents: 'agents',
+  skills: 'skills',
   calendar: 'calendar',
   settings: 'settings',
 };
@@ -236,6 +238,8 @@ function Shell({ route }: { route: Route }) {
           )
         ) : route.name === 'agents' ? (
           <Agents />
+        ) : route.name === 'skills' ? (
+          <Skills />
         ) : route.name === 'calendar' ? (
           <Calendar />
         ) : (

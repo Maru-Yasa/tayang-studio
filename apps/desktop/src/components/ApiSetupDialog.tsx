@@ -49,8 +49,11 @@ function ProviderLogo({ id, size = 22 }: { id: ApiProviderId; size?: number }) {
   );
 }
 
-/** Picks one of the provider's models from a searchable list; the recommended one comes first. */
-function ModelCombobox({
+/**
+ * The model: typed or pasted as an ID (a router like OpenRouter lists hundreds), or picked from the
+ * provider's list with search. The recommended one comes first in the list.
+ */
+function ModelField({
   models,
   value,
   recommended,
@@ -69,20 +72,32 @@ function ModelCombobox({
   const label = (m: string) => (m === recommended ? t('apiSetup.recommended', { model: m }) : m);
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          role="combobox"
-          aria-expanded={open}
-          aria-labelledby="api-model-label"
+      <div className="flex gap-2">
+        <Input
+          id="api-model"
+          value={value}
           disabled={disabled}
-          className="flex h-9 w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
-        >
-          <span className="truncate">{value ? label(value) : t('apiSetup.modelPick')}</span>
-          <ChevronsUpDown size={14} strokeWidth={1.5} aria-hidden="true" className="shrink-0 text-text-3" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-0">
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={t('apiSetup.modelPlaceholder')}
+          spellCheck={false}
+          autoComplete="off"
+          className="h-9 flex-1 font-mono text-[13px]"
+        />
+        {models.length > 0 && (
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-expanded={open}
+              disabled={disabled}
+              className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-card px-3 text-[13px] text-text-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+            >
+              {t('apiSetup.modelBrowse', { count: models.length })}
+              <ChevronsUpDown size={14} strokeWidth={1.5} aria-hidden="true" className="text-text-3" />
+            </button>
+          </PopoverTrigger>
+        )}
+      </div>
+      <PopoverContent align="end" className="w-[min(420px,90vw)] p-0">
         <Command>
           <CommandInput placeholder={t('apiSetup.modelSearch')} />
           <CommandList className="max-h-[280px]">
@@ -207,7 +222,7 @@ export function ApiSetupDialog({
     const keyArg = canUseSavedKey ? null : key.trim();
     // Listing models doesn't always need a key: one real call proves the key, the balance and the model.
     try {
-      const tried = await apiTry(baseUrl, keyArg, model);
+      const tried = await apiTry(baseUrl, keyArg, model.trim());
       if (!tried.ok) {
         if (live.current) {
           setError([failureText(tried), tried.detail].filter(Boolean).join(' · '));
@@ -231,7 +246,7 @@ export function ApiSetupDialog({
         return;
       }
       try {
-        const settings = await apiSave({ provider, baseUrl, model, models: check?.models ?? [model] }, keyArg);
+        const settings = await apiSave({ provider, baseUrl, model: model.trim(), models: check?.models.length ? check.models : [model.trim()] }, keyArg);
         track('agent connected', { agent: 'custom', provider });
         // The chat's model menu keeps each agent's last list: read the new provider's models now.
         void useModels.getState().load('custom', true);
@@ -257,6 +272,8 @@ export function ApiSetupDialog({
   const p = preset(provider);
   const providerName = (id: ApiProviderId) => preset(id).name ?? t('apiSetup.providers.other.name');
   const keyReady = canUseSavedKey || !!key.trim() || provider === '9router' || provider === 'other';
+  /** Some providers have no model list; then the model is pasted and one real call proves it. */
+  const canSave = !!check && (check.ok || check.failure === 'notFound');
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
@@ -303,7 +320,7 @@ export function ApiSetupDialog({
             className="flex flex-col gap-4"
             onSubmit={(e) => {
               e.preventDefault();
-              if (check?.ok) void save();
+              if (canSave) void save();
               else void runCheck();
             }}
           >
@@ -363,12 +380,13 @@ export function ApiSetupDialog({
               {savedKey && sameAsSaved && <span className="text-xs text-text-3">{t('apiSetup.keySaved')}</span>}
             </label>
 
-            {check?.ok && (
+            {canSave && (
               <div className="flex flex-col gap-1.5">
-                <span id="api-model-label" className="text-[13px] font-medium">
+                <label htmlFor="api-model" className="text-[13px] font-medium">
                   {t('apiSetup.model')}
-                </span>
-                <ModelCombobox models={check.models} value={model} recommended={p.model} disabled={busy} onChange={setModel} />
+                </label>
+                <ModelField models={check.models} value={model} recommended={p.model} disabled={busy} onChange={setModel} />
+                <span className="text-xs text-text-3">{check.models.length ? t('apiSetup.modelHint') : t('apiSetup.modelHintNoList')}</span>
               </div>
             )}
 
@@ -400,8 +418,8 @@ export function ApiSetupDialog({
             )}
 
             <div className="flex justify-end gap-2">
-              {check?.ok ? (
-                <Button type="submit" disabled={busy || !model} className="gap-2">
+              {canSave ? (
+                <Button type="submit" disabled={busy || !model.trim()} className="gap-2">
                   <KeyRound size={16} aria-hidden="true" />
                   {t('apiSetup.save')}
                 </Button>

@@ -44,7 +44,7 @@ describe('ApiSetupDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Check key' }));
     expect(ipc.apiCheck).toHaveBeenCalledWith('https://api.deepseek.com', 'sk-123');
     expect(await screen.findByText('Connected. 2 models available')).toBeTruthy();
-    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('deepseek-chat (recommended)');
+    expect(screen.getByLabelText('Model')).toHaveProperty('value', 'deepseek-chat');
 
     await user.click(screen.getByRole('button', { name: 'Save and connect' }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved));
@@ -94,12 +94,12 @@ describe('ApiSetupDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Check key' }));
     expect(ipc.apiCheck).toHaveBeenCalledWith('https://api.deepseek.com', null);
     await screen.findByText('Connected. 2 models available');
-    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('deepseek-reasoner');
-    await user.click(screen.getByRole('combobox', { name: 'Model' }));
+    expect(screen.getByLabelText('Model')).toHaveProperty('value', 'deepseek-reasoner');
+    await user.click(screen.getByRole('button', { name: 'Browse 2' }));
     await user.type(screen.getByPlaceholderText('Search models…'), 'chat');
     expect(screen.queryByRole('option', { name: 'deepseek-reasoner' })).toBeNull();
     await user.click(screen.getByRole('option', { name: 'deepseek-chat (recommended)' }));
-    await user.click(screen.getByRole('combobox', { name: 'Model' }));
+    await user.click(screen.getByRole('button', { name: 'Browse 2' }));
     await user.click(screen.getByRole('option', { name: 'deepseek-reasoner' }));
     await user.click(screen.getByRole('button', { name: 'Save and connect' }));
     await waitFor(() => expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-reasoner', models: ['deepseek-chat', 'deepseek-reasoner'] }, null));
@@ -117,5 +117,38 @@ describe('ApiSetupDialog', () => {
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', "The key was refused. Copy it again from your provider. · Invalid 'Authorization' header or token.");
     expect(ipc.engineInstall).not.toHaveBeenCalled();
     expect(ipc.apiSave).not.toHaveBeenCalled();
+  });
+
+  it('takes a pasted model ID that the list does not need to have', async () => {
+    vi.mocked(ipc.apiCheck).mockResolvedValue({ ok: true, models: ['a/one', 'b/two'], failure: null, detail: null });
+    render(<ApiSetupDialog open onOpenChange={() => {}} onSaved={() => {}} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /Other/ }));
+    await user.type(screen.getByLabelText(/^Address/), 'https://openrouter.ai/api/v1');
+    await user.type(screen.getByLabelText(/API key/), 'sk-or');
+    await user.click(screen.getByRole('button', { name: 'Check key' }));
+    const field = await screen.findByLabelText('Model');
+    await user.clear(field);
+    await user.type(field, '  x-ai/grok-5 ');
+    await user.click(screen.getByRole('button', { name: 'Save and connect' }));
+    await waitFor(() =>
+      expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'other', baseUrl: 'https://openrouter.ai/api/v1', model: 'x-ai/grok-5', models: ['a/one', 'b/two'] }, 'sk-or'),
+    );
+    expect(ipc.apiTry).toHaveBeenCalledWith('https://openrouter.ai/api/v1', 'sk-or', 'x-ai/grok-5');
+  });
+
+  it('lets the model be pasted when the provider has no model list', async () => {
+    vi.mocked(ipc.apiCheck).mockResolvedValue({ ok: false, models: [], failure: 'notFound', detail: null });
+    render(<ApiSetupDialog open onOpenChange={() => {}} onSaved={() => {}} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /Other/ }));
+    await user.type(screen.getByLabelText(/^Address/), 'https://llm.example.com/v1');
+    await user.click(screen.getByRole('button', { name: 'Check key' }));
+    const save = await screen.findByRole('button', { name: 'Save and connect' });
+    expect(save).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: /^Browse/ })).toBeNull();
+    await user.type(screen.getByLabelText('Model'), 'my-model');
+    await user.click(save);
+    await waitFor(() => expect(ipc.apiSave).toHaveBeenCalledWith({ provider: 'other', baseUrl: 'https://llm.example.com/v1', model: 'my-model', models: ['my-model'] }, ''));
   });
 });

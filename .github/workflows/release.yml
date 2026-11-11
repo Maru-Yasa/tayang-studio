@@ -93,6 +93,9 @@ jobs:
           - name: Linux
             platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+          - name: Linux ARM
+            platform: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
