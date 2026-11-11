@@ -8,6 +8,7 @@ vi.mock('@/lib/ipc', () => ({
   listMessages: vi.fn().mockResolvedValue([]),
   addMessage: vi.fn().mockResolvedValue(null),
   agentStart: vi.fn().mockResolvedValue(undefined),
+  listSkills: vi.fn().mockResolvedValue([]),
   agentPrompt: vi.fn().mockResolvedValue(undefined),
   agentCancel: vi.fn(),
   agentStop: vi.fn().mockResolvedValue(undefined),
@@ -29,7 +30,7 @@ vi.mock('@/lib/events', () => ({
   onPermission: vi.fn(async () => () => {}),
 }));
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
-import { addMessage, agentPrompt, agentRespondPermission, agentStart, agentStop, getChat, latestRenderInfo, upsertJob } from '@/lib/ipc';
+import { addMessage, agentPrompt, agentRespondPermission, agentStart, agentStop, getChat, latestRenderInfo, listSkills, upsertJob } from '@/lib/ipc';
 import { MessageList } from '@/components/MessageList';
 import { BUSY_NOTE, failChatJob, useChat } from '@/state/chat';
 import { needsYou } from '@/state/jobs';
@@ -356,6 +357,34 @@ describe('skills preamble', () => {
     expect(lead.type === 'text' && lead.text).toContain(FOREGROUND_RULE);
     // And to leave the final mp4 in renders/, where Tayang reads it.
     expect(lead.type === 'text' && lead.text).toContain(RENDERS_RULE);
+  });
+});
+
+describe("the user's own skills", () => {
+  const hooks = { id: 'hooks', description: 'Use for hooks', enabled: true, path: '/d/skills/hooks/SKILL.md' };
+
+  it('are listed for agents without the plugin, once per session', async () => {
+    vi.mocked(listSkills).mockResolvedValue([hooks]);
+    vi.mocked(agentPrompt).mockClear();
+    await useChat.getState().send('s1', [{ type: 'text', text: 'go' }], { agentId: 'codex' });
+    expect(JSON.stringify(vi.mocked(agentPrompt).mock.calls[0]![1])).toContain('- hooks: Use for hooks (/d/skills/hooks/SKILL.md)');
+    await useChat.getState().send('s1', [{ type: 'text', text: 'more' }]);
+    expect(JSON.stringify(vi.mocked(agentPrompt).mock.calls[1]![1])).not.toContain('hooks:');
+  });
+
+  it('are not listed for Claude, which loads them as a plugin', async () => {
+    vi.mocked(listSkills).mockResolvedValue([hooks]);
+    vi.mocked(agentPrompt).mockClear();
+    await useChat.getState().send('s2', [{ type: 'text', text: 'go' }], { agentId: 'claude' });
+    expect(JSON.stringify(vi.mocked(agentPrompt).mock.calls[0]![1])).not.toContain('hooks:');
+  });
+
+  it("don't stop a chat when they can't be read", async () => {
+    vi.mocked(listSkills).mockRejectedValue(new Error('no folder'));
+    vi.mocked(agentPrompt).mockClear();
+    await useChat.getState().send('s3', [{ type: 'text', text: 'go' }], { agentId: 'codex' });
+    expect(vi.mocked(agentPrompt)).toHaveBeenCalledTimes(1);
+    vi.mocked(listSkills).mockResolvedValue([]);
   });
 });
 

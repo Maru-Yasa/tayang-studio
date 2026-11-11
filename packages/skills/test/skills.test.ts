@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Project, Settings, Style, SystemInfo } from '@tayang/shared';
 import {
   FRAME_CHECK_PROMPT,
+  BUILTIN_SKILLS,
+  userSkillsText,
   FRAMES_CHECKED_TOKEN,
   hasFramesChecked,
   stripFramesToken,
@@ -268,5 +270,26 @@ describe('frames-checked marker', () => {
     expect(stripFramesToken('Selesai. [')).toBe('Selesai.');
     expect(stripFramesToken('Selesai [tayang:other] kok')).toBe('Selesai [tayang:other] kok');
     expect(stripFramesToken('Array [1] x')).toBe('Array [1] x');
+  });
+});
+
+describe('user skills', () => {
+  const skill = (id: string, enabled: boolean) => ({ id, description: `Use for ${id}.\n  More.`, enabled, path: `/data/user-skills/skills/${id}/SKILL.md` });
+
+  it('lists only the skills that are on, with where to read them', () => {
+    const text = userSkillsText([skill('hooks', true), skill('off', false)]);
+    expect(text).toContain('- hooks: Use for hooks. More. (/data/user-skills/skills/hooks/SKILL.md)');
+    expect(text).not.toContain('off');
+  });
+
+  it('says nothing when none are on', () => {
+    expect(userSkillsText([skill('off', false)])).toBe('');
+  });
+
+  it('shows the built-in skill with its description and no frontmatter', () => {
+    const [builtin] = BUILTIN_SKILLS;
+    expect(builtin.id).toBe('tayang-studio');
+    expect(builtin.description).toMatch(/^Use whenever you are running inside Tayang Studio/);
+    expect(builtin.body.startsWith('# Tayang Studio')).toBe(true);
   });
 });

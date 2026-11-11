@@ -1,6 +1,6 @@
 import { notifyAgent } from '@/lib/agentNotify';
 import { create } from 'zustand';
-import { FOREGROUND_RULE, RENDERS_RULE, buildSessionPreamble, languageHint, sessionFacts, stripFramesToken } from '@tayang/skills';
+import { FOREGROUND_RULE, RENDERS_RULE, buildSessionPreamble, languageHint, sessionFacts, stripFramesToken, userSkillsText } from '@tayang/skills';
 import type { AgentId, AgentQuestion, AgentUpdate, Chat, ChatMessage, Style, FileInfo, JobStatus, MessagePart, PermissionRequest, QuestionResponse } from '@tayang/shared';
 import {
   addMessage,
@@ -10,6 +10,7 @@ import {
   agentPrompt,
   agentSetAuto,
   agentStart,
+  listSkills,
   agentStop,
   getChat,
   listMessages,
@@ -365,6 +366,15 @@ export const autoOn = (
   chatId: string | null,
   settingsAuto: boolean,
 ) => (chatId ? s.auto[chatId] : s.pendingAuto) ?? settingsAuto;
+
+/** The user's own skills that are on, as text for an agent; empty when none are (or they can't be read). */
+async function userSkills(): Promise<string> {
+  try {
+    return userSkillsText(await listSkills());
+  } catch {
+    return '';
+  }
+}
 
 export const useChat = create<ChatState>((set, get) => {
   const append = (chatId: string, m: ChatMessage) =>
@@ -773,6 +783,11 @@ export const useChat = create<ChatState>((set, get) => {
           if (agent !== 'claude' || noPlugin) lead.push({ type: 'text', text: buildSessionPreamble(uiLang, facts) });
           // The foreground and renders/ rules too: a project made before them has no copy in its AGENTS.md or CLAUDE.md.
           else lead.push({ type: 'text', text: [languageHint(uiLang), sessionFacts(facts), FOREGROUND_RULE, RENDERS_RULE].filter(Boolean).join('\n\n') });
+          // Claude loads the user's own skills as a plugin; other agents get a list of them.
+          if (agent !== 'claude') {
+            const mine = await userSkills();
+            if (mine) lead.push({ type: 'text', text: mine });
+          }
         }
         const recap = pendingRecap.get(chatId);
         if (recap?.text) {

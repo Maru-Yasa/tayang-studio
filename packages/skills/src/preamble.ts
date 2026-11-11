@@ -48,3 +48,34 @@ export function buildSessionPreamble(language?: UiLanguage | null, facts?: Sessi
     .filter(Boolean)
     .join('\n\n');
 }
+
+/** A skill the user added on the Skills screen. */
+export interface UserSkill {
+  id: string;
+  description: string;
+  enabled: boolean;
+  /** Its SKILL.md on disk. */
+  path: string;
+}
+
+/**
+ * The user's own skills that are on, for agents that can't load them as a plugin: each one's name,
+ * when to use it and where its SKILL.md is. Empty when none are on.
+ */
+export function userSkillsText(skills: readonly UserSkill[]): string {
+  const on = skills.filter((s) => s.enabled);
+  if (!on.length) return '';
+  return [
+    'The user added these skills of their own. When a task matches one, read its SKILL.md first and follow it:',
+    ...on.map((s) => `- ${s.id}: ${s.description.replace(/\s+/g, ' ').trim()} (${s.path})`),
+  ].join('\n');
+}
+
+/** The skills Tayang ships, always on: shown read-only on the Skills screen. */
+export const BUILTIN_SKILLS: readonly { id: string; description: string; body: string }[] = [
+  {
+    id: 'tayang-studio',
+    description: /^---\n[\s\S]*?^description:\s*(.*)$/m.exec(tayangStudio)?.[1]?.trim() ?? '',
+    body: stripFrontmatter(tayangStudio),
+  },
+];

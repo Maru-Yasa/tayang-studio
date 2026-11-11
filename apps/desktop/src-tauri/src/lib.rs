@@ -12,6 +12,7 @@ pub mod files;
 pub mod media;
 pub mod projects;
 pub mod scheduler;
+pub mod skills;
 pub mod styles_sync;
 pub mod system;
 pub mod telemetry;
@@ -101,6 +102,12 @@ pub fn run() {
             commands::get_system_info,
             commands::system_locale,
             commands::detect_agents,
+            commands::skills_list,
+            commands::skill_read,
+            commands::skill_save,
+            commands::skill_set_enabled,
+            commands::skill_delete,
+            commands::skill_import,
             commands::api_status,
             commands::api_check,
             commands::api_try,

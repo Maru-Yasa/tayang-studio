@@ -1209,6 +1209,63 @@ fn session_options(agent: AgentId, plugin: Option<&Path>, skills: bool) -> crate
     crate::acp::SessionOptions { meta: Some(meta), env, auto: false, use_modes, mode_timeout: None, model: None, error_log: error_log(agent), usage_log: None }
 }
 
+/// Adds a local plugin to a Claude session that has `_meta` (sessions without it get no plugins).
+fn add_plugin(options: &mut crate::acp::SessionOptions, path: &Path) {
+    let Some(meta) = options.meta.as_mut() else { return };
+    let entry = serde_json::json!({ "type": "local", "path": path.to_string_lossy() });
+    match meta["claudeCode"]["options"]["plugins"].as_array_mut() {
+        Some(list) => list.push(entry),
+        None => meta["claudeCode"] = serde_json::json!({ "options": { "plugins": [entry] } }),
+    }
+}
+
+fn skills_root(app: &AppHandle) -> CmdResult<PathBuf> {
+    crate::skills::root(&app.path().app_data_dir().map_err(err)?)
+}
+
+/// The user's own skills, on and off.
+#[tauri::command]
+pub fn skills_list(app: AppHandle) -> CmdResult<Vec<crate::skills::Skill>> {
+    Ok(crate::skills::list(&skills_root(&app)?))
+}
+
+#[tauri::command]
+pub fn skill_read(app: AppHandle, id: String) -> CmdResult<crate::skills::SkillDetail> {
+    crate::skills::read(&skills_root(&app)?, &id)
+}
+
+/// Creates a skill (no `id`) or saves an existing one's description and instructions.
+#[tauri::command]
+pub fn skill_save(
+    app: AppHandle,
+    id: Option<String>,
+    name: String,
+    description: String,
+    body: String,
+) -> CmdResult<crate::skills::Skill> {
+    let root = skills_root(&app)?;
+    match id {
+        Some(id) => crate::skills::update(&root, &id, &description, &body),
+        None => crate::skills::create(&root, &name, &description, &body),
+    }
+}
+
+#[tauri::command]
+pub fn skill_set_enabled(app: AppHandle, id: String, enabled: bool) -> CmdResult<crate::skills::Skill> {
+    crate::skills::set_enabled(&skills_root(&app)?, &id, enabled)
+}
+
+#[tauri::command]
+pub fn skill_delete(app: AppHandle, id: String) -> CmdResult<()> {
+    crate::skills::delete(&skills_root(&app)?, &id)
+}
+
+/// Adds a skill from a SKILL.md file or a folder with one.
+#[tauri::command]
+pub fn skill_import(app: AppHandle, path: String) -> CmdResult<crate::skills::Skill> {
+    crate::skills::import(&skills_root(&app)?, Path::new(&path))
+}
+
 /// Tayang's own Claude Code config folder (see `claude_account`), created on first use.
 pub fn claude_config_dir(app: &AppHandle) -> CmdResult<PathBuf> {
     let dir = crate::claude_account::config_dir(&app.path().app_data_dir().map_err(err)?);
@@ -1325,6 +1382,12 @@ pub async fn agent_start(
         None
     };
     let mut options = session_options(agent_id, plugin.as_deref(), skills);
+    // The user's own skills (the Skills screen) load as a second plugin.
+    if agent_id == AgentId::Claude && skills {
+        if let Some(mine) = app.path().app_data_dir().ok().and_then(|d| crate::skills::root(&d).ok()).and_then(|r| crate::skills::plugin(&r)) {
+            add_plugin(&mut options, &mine);
+        }
+    }
     options.env.extend(claude_env(&app, agent_id)?);
     options.env.extend(launch_env);
     options.auto = wants_auto(&chat_id, auto.unwrap_or(false));
@@ -2532,6 +2595,23 @@ mod tests {
             assert!(o.meta.is_none());
             assert_eq!(o.env, vec![("TAYANG_STUDIO".to_string(), "1".to_string())]);
         }
+    }
+
+    #[test]
+    fn the_users_skills_load_as_a_second_plugin() {
+        let mut o = session_options(AgentId::Claude, Some(Path::new("/res/agent-plugin")), true);
+        add_plugin(&mut o, Path::new("/data/user-skills"));
+        let plugins = &o.meta.unwrap()["claudeCode"]["options"]["plugins"];
+        assert_eq!(plugins[1]["path"], "/data/user-skills");
+        assert_eq!(plugins[1]["type"], "local");
+
+        let mut alone = session_options(AgentId::Claude, None, true);
+        add_plugin(&mut alone, Path::new("/data/user-skills"));
+        assert_eq!(alone.meta.unwrap()["claudeCode"]["options"]["plugins"][0]["path"], "/data/user-skills");
+
+        let mut internal = session_options(AgentId::Claude, None, false);
+        add_plugin(&mut internal, Path::new("/data/user-skills"));
+        assert!(internal.meta.is_none());
     }
 
     #[test]
