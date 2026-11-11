@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, RefreshCw } from 'lucide-react';
 import type { Settings, VoiceCheck, VoiceErrorCode, VoiceKeySource, VoiceSource } from '@tayang/shared';
+import elevenlabs from '@/assets/brand/elevenlabs.svg';
+import fishaudio from '@/assets/brand/fishaudio.svg';
+import tayang from '@/assets/brand/oyen-symbol-color.svg';
+import voicestudio from '@/assets/brand/voicestudio.svg';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -9,6 +13,14 @@ import { updateSettings, voiceKeyClear, voiceKeySave, voiceStatus, voiceStudioCh
 import { cn } from '@/lib/utils';
 
 const VOICESTUDIO_URL = 'https://voicestudio.sh';
+
+/** The sources in the order they are offered, each with its brand mark. */
+const SOURCES: { id: VoiceSource; name: string; logo: string }[] = [
+  { id: 'tayang', name: 'Tayang', logo: tayang },
+  { id: 'elevenlabs', name: 'ElevenLabs', logo: elevenlabs },
+  { id: 'fishaudio', name: 'Fish Audio', logo: fishaudio },
+  { id: 'voicestudio', name: 'VoiceStudio', logo: voicestudio },
+];
 
 /** The sources that speak with the user's own API key. */
 const KEY_SOURCES: Record<VoiceKeySource, { name: string; keysUrl: string; voiceKey: 'elevenVoiceId' | 'fishVoiceId' }> = {
@@ -199,10 +211,12 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
         </div>
         <Tabs value={shown} onValueChange={(v) => void pick(v as VoiceSource)}>
           <TabsList aria-label={label} className="h-9 bg-background">
-            <TabsTrigger value="tayang" className="px-3 text-[13px]">Tayang</TabsTrigger>
-            <TabsTrigger value="elevenlabs" className="px-3 text-[13px]">ElevenLabs</TabsTrigger>
-            <TabsTrigger value="fishaudio" className="px-3 text-[13px]">Fish Audio</TabsTrigger>
-            <TabsTrigger value="voicestudio" className="px-3 text-[13px]">VoiceStudio</TabsTrigger>
+            {SOURCES.map((o) => (
+              <TabsTrigger key={o.id} value={o.id} className="gap-2 px-3 text-[13px]">
+                <img src={o.logo} alt="" aria-hidden="true" className="size-3.5 shrink-0" />
+                {o.name}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
       </div>
