@@ -981,8 +981,25 @@ describe('ChatProject render and jobs', () => {
     render(<ChatProject chatId="c1" />);
     await screen.findByText('Kenapa rupiah melemah?', { selector: 'span' });
     await user.click(screen.getByRole('button', { name: 'Render video' }));
-    expect(await screen.findByText("Couldn't render: hyperframes render failed: no composition")).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn't render: hyperframes render failed: no composition/)).toBeInTheDocument();
     expect(ipc.updateProject).not.toHaveBeenCalled();
+  });
+
+  it('tells the agent when the render fails, with the error, so it can fix the project', async () => {
+    const user = userEvent.setup();
+    vi.mocked(ipc.mediaRender).mockRejectedValue(new Error('hyperframes render failed: No composition found. No index.html file found.'));
+    render(<ChatProject chatId="c1" />);
+    await screen.findByText('Kenapa rupiah melemah?', { selector: 'span' });
+    await user.click(screen.getByRole('button', { name: 'Render video' }));
+    await waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    const [chatId, parts] = vi.mocked(ipc.agentPrompt).mock.calls[0]!;
+    expect(chatId).toBe('c1');
+    const sent = parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n');
+    expect(sent).toContain('No index.html file found.');
+    expect(sent).toContain('fix');
+    // The chat shows the short request, not the whole error.
+    expect(await screen.findByText('Rendering failed. Find out why, fix it, and tell me when it can render.')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Sent to your agent to fix');
   });
 
   it('tracks a turn as a build job: working, needs you, done, failed', async () => {

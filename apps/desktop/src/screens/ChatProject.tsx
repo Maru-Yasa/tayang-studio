@@ -154,6 +154,27 @@ export function ChatProject({ chatId, draft }: { chatId: string; draft?: string 
     void useChat.getState().send(chatId, parts, opts);
   };
 
+  /** Sends a failed render to the agent; false when the chat can't take a message now. */
+  const askAgentToFixRender = (message: string): boolean => {
+    if (!project || useChat.getState().streaming[chatId]) return false;
+    const visible = t('chat.renderFailedAsk');
+    const command = runs?.render.length ? [...(runs.install?.length ? [runs.install] : []), runs.render].map(shellDisplay).join(' && ') : null;
+    const detail = [
+      visible,
+      '',
+      "Tayang's Render video button failed with this error:",
+      '```',
+      message.trim(),
+      '```',
+      ...(command ? [`It ran: ${command}`] : []),
+      'Find the cause and fix the project so it renders. If the video is not built yet, say so and build it first. Then tell the user it is ready to render.',
+    ].join('\n');
+    const promptParts: MessagePart[] = [{ type: 'text', text: detail }];
+    const opts = projectSendOptions(project, agent, promptParts);
+    void useChat.getState().send(chatId, [{ type: 'text', text: visible }], { ...opts, promptParts: opts.promptParts ?? promptParts });
+    return true;
+  };
+
   const renderVideo = async () => {
     if (!project || rendering) return;
     setRendering(true);
@@ -168,8 +189,11 @@ export function ChatProject({ chatId, draft }: { chatId: string; draft?: string 
       useApp.getState().bumpProjects();
       setReloadKey((k) => k + 1);
     } catch (e) {
-      setRenderError(t('chat.couldntRender', { message: e instanceof Error ? e.message : String(e) }));
+      const message = e instanceof Error ? e.message : String(e);
       trackError(e, 'render');
+      // The agent made the project, so it is the one to fix it: tell it what failed, in this chat.
+      const asked = askAgentToFixRender(message);
+      setRenderError(`${t('chat.couldntRender', { message })}${asked ? ` · ${t('chat.renderSentToAgent')}` : ''}`);
     } finally {
       setRendering(false);
       useRender.getState().end(project.id);
