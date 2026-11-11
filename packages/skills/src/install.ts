@@ -63,12 +63,42 @@ function uvInstall(sys: SystemInfo): string {
   return 'curl -LsSf https://astral.sh/uv/install.sh | sh';
 }
 
-function elevenLabsCommands(sys: SystemInfo, agent: AgentId, key: string): string[] {
-  const cmds = [uvInstall(sys)];
-  if (agent === 'claude') {
-    cmds.push(`claude mcp add -s user elevenlabs -e ELEVENLABS_API_KEY=${key} -- uvx elevenlabs-mcp`);
+/** The command that adds the ElevenLabs MCP server for every folder, for agents that have one. */
+function elevenLabsAdd(agent: AgentId, key: string): string | null {
+  const env = `ELEVENLABS_API_KEY=${key}`;
+  switch (agent) {
+    case 'claude':
+      return `claude mcp add -s user elevenlabs -e ${env} -- uvx elevenlabs-mcp`;
+    case 'codex':
+      return `codex mcp add elevenlabs --env ${env} -- uvx elevenlabs-mcp`;
+    case 'opencode':
+      return `opencode mcp add --global --env ${env} elevenlabs -- uvx elevenlabs-mcp`;
+    default:
+      return null;
   }
-  return cmds;
+}
+
+/** The user-level config file an agent keeps its MCP servers in, the key they go under and one entry. */
+function elevenLabsEntry(agent: AgentId, key: string): { file: string; under: string; entry: string } {
+  const env = { ELEVENLABS_API_KEY: key };
+  const opencode = JSON.stringify({ type: 'local', command: ['uvx', 'elevenlabs-mcp'], environment: env, enabled: true });
+  const standard = JSON.stringify({ command: 'uvx', args: ['elevenlabs-mcp'], env });
+  switch (agent) {
+    case 'opencode':
+      return { file: '`~/.config/opencode/opencode.json` (or the `opencode.jsonc` there, if that is the one that exists)', under: 'mcp', entry: opencode };
+    case 'custom':
+      // "Your API": Tayang's own engine, whose config folder is in its environment.
+      return { file: '`opencode.json` in the folder the `OPENCODE_CONFIG_DIR` environment variable names', under: 'mcp', entry: opencode };
+    case 'antigravity':
+      return { file: '`~/.gemini/antigravity/mcp_config.json`', under: 'mcpServers', entry: standard };
+    default:
+      return { file: '`~/.gemini/settings.json`', under: 'mcpServers', entry: standard };
+  }
+}
+
+function elevenLabsCommands(sys: SystemInfo, agent: AgentId, key: string): string[] {
+  const add = elevenLabsAdd(agent, key);
+  return add ? [uvInstall(sys), add] : [uvInstall(sys)];
 }
 
 export function installCommands(tool: ToolId, sys: SystemInfo, agent: AgentId): string[] {
@@ -139,16 +169,26 @@ export function buildInstallPrompt(
   const run = (cmds: string[]) => lines.push(...cmds.map((c) => `  ${c}`));
   if (tool === 'elevenlabs-mcp') {
     const key = opts?.elevenLabsKey ?? '<ELEVENLABS_API_KEY>';
-    if (agent === 'claude') {
+    const cmds = commandsFor(tool, sys, agent, key);
+    const { file, under, entry } = elevenLabsEntry(agent, key);
+    const byHand = `add this under \`${under}\` in ${file}, creating the file if it is missing and keeping everything already in it:`;
+    if (agent === 'claude' || agent === 'codex') {
       lines.push('Install `uv` first if it is missing, then register the MCP server. Run:');
-      run(commandsFor(tool, sys, agent, key));
+      run(cmds);
+    } else if (agent === 'opencode') {
+      lines.push('Install `uv` first if it is missing, then register the MCP server for every folder. Run:');
+      run(cmds);
+      lines.push(`If your \`opencode mcp add\` does not take those flags, ${byHand}`);
+      run([`"elevenlabs": ${entry}`]);
     } else {
       lines.push('Install `uv` first if it is missing:');
-      run([commandsFor(tool, sys, agent, key)[0]!]);
-      lines.push(
-        `Then add an MCP server named \`elevenlabs\` that runs \`uvx elevenlabs-mcp\` with the environment variable \`ELEVENLABS_API_KEY=${key}\`, in your user-level (global) MCP configuration so it works in every folder.`,
-      );
+      run(cmds);
+      lines.push(`Then ${byHand}`);
+      run([`"elevenlabs": ${entry}`]);
     }
+    // Tayang checks the config file itself; a version number would only be noise if this fails.
+    lines.push('Then reply with one short line: "done", or what went wrong.');
+    return lines.join('\n');
   } else if (needsSudo(tool, sys)) {
     // A sudo password prompt can't be answered from inside the agent.
     lines.push('This needs the system package manager with sudo. Do not run sudo yourself.');

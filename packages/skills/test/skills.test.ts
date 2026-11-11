@@ -91,10 +91,33 @@ describe('install', () => {
     expect(p).toContain('ELEVENLABS_API_KEY=sk_real');
     // User scope, so the server works in every project folder, not just the setup folder.
     expect(p).toContain('claude mcp add -s user elevenlabs');
-    const o = buildInstallPrompt('elevenlabs-mcp', mac, 'codex', { elevenLabsKey: 'sk_real' });
-    expect(o).toContain('uvx elevenlabs-mcp');
-    expect(o).toContain('sk_real');
-    expect(o).toContain('user-level');
+    expect(p).not.toContain('version');
+  });
+  it('elevenlabs for every other agent goes into its own user-level config', () => {
+    const prompt = (agent: Parameters<typeof buildInstallPrompt>[2]) =>
+      buildInstallPrompt('elevenlabs-mcp', mac, agent, { elevenLabsKey: 'sk_real' });
+    expect(prompt('codex')).toContain('codex mcp add elevenlabs --env ELEVENLABS_API_KEY=sk_real -- uvx elevenlabs-mcp');
+    expect(installCommands('elevenlabs-mcp', mac, 'codex')[1]).toBe(
+      'codex mcp add elevenlabs --env ELEVENLABS_API_KEY=sk_•••• -- uvx elevenlabs-mcp',
+    );
+    const oc = prompt('opencode');
+    expect(oc).toContain('opencode mcp add --global --env ELEVENLABS_API_KEY=sk_real elevenlabs -- uvx elevenlabs-mcp');
+    expect(oc).toContain('~/.config/opencode/opencode.json');
+    expect(oc).toContain('"elevenlabs": {"type":"local","command":["uvx","elevenlabs-mcp"],"environment":{"ELEVENLABS_API_KEY":"sk_real"},"enabled":true}');
+    const api = prompt('custom');
+    expect(api).toContain('OPENCODE_CONFIG_DIR');
+    expect(api).toContain('under `mcp`');
+    expect(api).not.toContain('opencode mcp add');
+    const standard = '"elevenlabs": {"command":"uvx","args":["elevenlabs-mcp"],"env":{"ELEVENLABS_API_KEY":"sk_real"}}';
+    expect(prompt('gemini')).toContain('~/.gemini/settings.json');
+    expect(prompt('gemini')).toContain(standard);
+    expect(prompt('antigravity')).toContain('~/.gemini/antigravity/mcp_config.json');
+    expect(prompt('antigravity')).toContain(standard);
+    // The masked key never reaches the agent, the real one never reaches the screen.
+    for (const a of ['claude', 'codex', 'opencode', 'gemini', 'antigravity', 'custom'] as const) {
+      expect(prompt(a)).not.toContain('sk_••••');
+      expect(installCommands('elevenlabs-mcp', mac, a).join(' ')).not.toContain('sk_real');
+    }
   });
 });
 
