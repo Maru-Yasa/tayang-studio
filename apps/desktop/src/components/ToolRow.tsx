@@ -69,6 +69,8 @@ export function ToolRow({ tool, sys, agentName, busy, onInstall, onAskKey }: {
   // Node, and Chrome on a Mac without Homebrew: the user installs it from the download page.
   const manualUrl = manualInstallUrl(tool.id, sys);
   const status = inst?.status ?? 'missing';
+  // Installed, but older than Tayang needs: say so, or "Install" reads as if nothing was found.
+  const tooOld = tool.id === 'node' && tool.found && !tool.ok && !!tool.version;
   const ok = tool.ok || status === 'done';
   const showMissing = !ok && (status === 'missing' || status === 'failed' || status === 'key');
   const detail = ok
@@ -76,11 +78,12 @@ export function ToolRow({ tool, sys, agentName, busy, onInstall, onAskKey }: {
       ? isEleven ? t('tools.addedTo', { agent: agentName }) : t('tools.installedBy', { agent: agentName })
       : detailText
     : (manualUrl && tool.id === 'chrome' && t('tools.chrome.missingManual')) ||
+      (tooOld && t('tools.node.tooOld', { version: tool.version ?? '' })) ||
       (tool.id === 'node' && t('tools.node.missing')) ||
       (tool.id === 'ffmpeg' && t('tools.ffmpeg.missing')) ||
       (tool.id === 'ytdlp' && t('tools.ytdlp.missing')) ||
       detailText;
-  const label = isEleven ? t('tools.addTo', { agent: agentName }) : t('tools.install');
+  const label = isEleven ? t('tools.addTo', { agent: agentName }) : tooOld ? t('tools.update') : t('tools.install');
   const expected = sys ? installCommands(tool.id, sys, agent) : [];
 
   return (

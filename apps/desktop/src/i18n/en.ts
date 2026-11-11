@@ -162,6 +162,7 @@ export const en = {
       name: 'Node.js',
       detail: 'Runs the video engine · needs 22 or newer',
       missing: 'Install Node.js 22 or newer, then press Check again',
+      tooOld: 'Found Node.js {{version}} · Tayang needs 22 or newer. Update it, then press Check again',
       ask: 'Install Node.js 22 or newer on this computer, then confirm node --version works.',
     },
     chrome: {
@@ -191,6 +192,7 @@ export const en = {
     installedBy: 'Installed by {{agent}}',
     addTo: 'Add to {{agent}}',
     install: 'Install',
+    update: 'Update',
     found: 'Found',
     added: 'Added',
     installing: 'Installing',

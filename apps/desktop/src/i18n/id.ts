@@ -164,6 +164,7 @@ export const id: Translations = {
       name: 'Node.js',
       detail: 'Menjalankan mesin video · butuh versi 22 atau lebih baru',
       missing: 'Pasang Node.js 22 atau lebih baru, lalu tekan Cek lagi',
+      tooOld: 'Ketemu Node.js {{version}} · Tayang butuh versi 22 atau lebih baru. Perbarui dulu, lalu tekan Cek lagi',
       ask: 'Pasang Node.js 22 atau lebih baru di komputer ini, lalu pastikan node --version berjalan.',
     },
     chrome: {
@@ -193,6 +194,7 @@ export const id: Translations = {
     installedBy: 'Dipasang oleh {{agent}}',
     addTo: 'Tambah ke {{agent}}',
     install: 'Pasang',
+    update: 'Perbarui',
     found: 'Ditemukan',
     added: 'Ditambahkan',
     installing: 'Memasang',

@@ -155,6 +155,17 @@ describe('Requirements', () => {
     expect(ipc.agentStart).not.toHaveBeenCalled();
   });
 
+  it('an old Node says which version it found and asks for an update', async () => {
+    const user = userEvent.setup();
+    vi.mocked(ipc.checkTools).mockResolvedValue(
+      missingFfmpeg.map((t) => (t.id === 'node' ? { ...tool('node', 'Node.js', true, false), found: true, version: '20.6.1' } : t)),
+    );
+    render(<Requirements />);
+    expect(await screen.findByText('Found Node.js 20.6.1 · Tayang needs 22 or newer. Update it, then press Check again')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Update Node.js' }));
+    expect(openUrl).toHaveBeenCalledWith('https://nodejs.org/en/download');
+  });
+
   it('Chrome on a Mac without Homebrew is installed by the user from google.com/chrome', async () => {
     const user = userEvent.setup();
     vi.mocked(ipc.getSystemInfo).mockResolvedValue({ os: 'macos', osVersion: '26', packageManager: null });
