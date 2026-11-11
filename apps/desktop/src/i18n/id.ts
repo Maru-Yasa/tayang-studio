@@ -202,6 +202,7 @@ export const id: Translations = {
     waiting: 'Menunggu izin',
     noVoiceTitle: 'Tanpa ElevenLabs, tidak ada voiceover',
     noVoiceText: '{{agent}} belum punya MCP ElevenLabs. Videomu tetap punya caption dan musik, tapi tanpa narasi.',
+    voiceInPlan: 'Sudah langganan Tayang {{plan}} ke atas? Suara ElevenLabs sudah termasuk, jadi langkah ini bisa dilewati.',
     keyLabel: 'API key ElevenLabs',
     getKey: 'Dapatkan key',
     keyNote: 'Disimpan di pengaturan MCP agenmu di komputer ini. Tayang tidak pernah mengunggahnya',

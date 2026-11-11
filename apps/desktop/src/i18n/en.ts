@@ -200,6 +200,7 @@ export const en = {
     waiting: 'Waiting for permission',
     noVoiceTitle: 'No voiceover without ElevenLabs',
     noVoiceText: "{{agent}} doesn't have the ElevenLabs MCP yet. Your videos will have captions and music, but no narration.",
+    voiceInPlan: 'Already on Tayang {{plan}} or above? ElevenLabs voice is included, so you can skip this.',
     keyLabel: 'ElevenLabs API key',
     getKey: 'Get a key',
     keyNote: "Stored in your agent's MCP settings on this computer. Tayang never uploads it",

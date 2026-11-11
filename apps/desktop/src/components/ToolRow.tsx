@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, Download } from 'lucide-react';
-import type { SystemInfo, ToolId, ToolStatus } from '@tayang/shared';
+import { PLANS, type SystemInfo, type ToolId, type ToolStatus } from '@tayang/shared';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { installCommands, manualInstallUrl } from '@tayang/skills';
 import sleepy from '@/assets/brand/oyen-expr-sleepy.svg';
@@ -13,6 +13,9 @@ import { toolDetail, toolName } from '@/lib/tools';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/state/app';
 import { useInstall, type LogLine, type ToolInstall } from '@/state/install';
+
+/** The cheapest plan with Tayang's own voiceover (ElevenLabs): its subscribers don't need the MCP. */
+const VOICE_PLAN = PLANS.find((p) => p.features.includes('voiceover'))?.name;
 
 export const TOOL_ORDER: ToolId[] = ['node', 'ffmpeg', 'chrome', 'elevenlabs-mcp', 'ytdlp'];
 
@@ -136,6 +139,7 @@ export function ToolRow({ tool, sys, agentName, busy, onInstall, onAskKey }: {
             <span className="text-[#D9C2B8]">
               {t('tools.noVoiceText', { agent: agentName })}
             </span>
+            {VOICE_PLAN && <span className="text-[#D9C2B8]">{t('tools.voiceInPlan', { plan: VOICE_PLAN })}</span>}
           </div>
         </div>
       )}

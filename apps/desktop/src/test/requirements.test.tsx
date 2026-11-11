@@ -227,6 +227,13 @@ describe('Requirements', () => {
     expect(details).toHaveTextContent('Let me check the metadata in the uv cache. 0.12.2');
   });
 
+  it('tells subscribers that their Tayang plan already includes ElevenLabs voice', async () => {
+    render(<Requirements />);
+    expect(
+      await screen.findByText('Already on Tayang Creator or above? ElevenLabs voice is included, so you can skip this.'),
+    ).toBeInTheDocument();
+  });
+
   it('disables other installs while one runs', async () => {
     const user = userEvent.setup();
     render(<Requirements />);
