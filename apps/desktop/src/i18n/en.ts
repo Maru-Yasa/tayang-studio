@@ -1184,6 +1184,7 @@ export const en = {
     modelPlaceholder: 'Paste a model ID, like openai/gpt-5.5',
     modelBrowse: 'Browse {{count}}',
     modelHint: 'Paste the ID from your provider, or browse their list.',
+    modelHintNoList: 'This address doesn’t list its models. Paste the ID; Tayang tries it when you save.',
     modelSearch: 'Search models…',
     modelNone: 'No model matches',
     recommended: '{{model}} (recommended)',

@@ -1178,6 +1178,7 @@ export const id: Translations = {
     modelPlaceholder: 'Tempel ID model, misalnya openai/gpt-5.5',
     modelBrowse: 'Lihat {{count}}',
     modelHint: 'Tempel ID dari provider kamu, atau lihat daftarnya.',
+    modelHintNoList: 'Alamat ini nggak punya daftar model. Tempel ID-nya; Tayang mencobanya waktu kamu simpan.',
     modelSearch: 'Cari model…',
     modelNone: 'Nggak ada model yang cocok',
     recommended: '{{model}} (disarankan)',

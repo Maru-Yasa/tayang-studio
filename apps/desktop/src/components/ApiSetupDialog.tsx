@@ -386,7 +386,7 @@ export function ApiSetupDialog({
                   {t('apiSetup.model')}
                 </label>
                 <ModelField models={check.models} value={model} recommended={p.model} disabled={busy} onChange={setModel} />
-                <span className="text-xs text-text-3">{t('apiSetup.modelHint')}</span>
+                <span className="text-xs text-text-3">{check.models.length ? t('apiSetup.modelHint') : t('apiSetup.modelHintNoList')}</span>
               </div>
             )}
 
