@@ -342,6 +342,8 @@ impl Db {
             "buildJobsChecked": false,
             "projectStatusChecked": false,
             "agentModels": {},
+            "voiceSource": "tayang",
+            "fishVoiceId": null,
         })
     }
 

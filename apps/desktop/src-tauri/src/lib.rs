@@ -20,6 +20,7 @@ pub mod telemetry;
 pub mod types;
 pub mod trace;
 pub mod usage;
+pub mod voice;
 
 use commands::AppState;
 use tauri::Manager;
@@ -112,6 +113,10 @@ pub fn run() {
             commands::skill_github_fetch,
             commands::skill_github_install,
             commands::skill_github_discard,
+            commands::voice_status,
+            commands::voice_fish_save,
+            commands::voice_fish_clear,
+            commands::voice_studio_check,
             commands::api_status,
             commands::api_check,
             commands::api_try,
