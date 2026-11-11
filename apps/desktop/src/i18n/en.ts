@@ -433,6 +433,8 @@ export const en = {
     render: 'Render video',
     rendering: 'Rendering…',
     couldntRender: "Couldn't render: {{message}}",
+    renderSentToAgent: 'Sent to your agent to fix',
+    renderFailedAsk: 'Rendering failed. Find out why, fix it, and tell me when it can render.',
     renderCommand: 'Render command',
     copyCommand: 'Copy the command',
     commandCopied: 'Copied',
