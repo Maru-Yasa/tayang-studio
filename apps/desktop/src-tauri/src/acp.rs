@@ -367,6 +367,53 @@ fn parse_modes(created: &Value) -> ModeState {
     }
 }
 
+/// How to take a session out of plan mode, where the agent only plans and never makes the video
+/// (Tayang has no mode menu to leave it). Agents report their mode as a `mode` config option
+/// (opencode: build / plan) or as `modes` (Claude: default, plan, ...).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LeavePlan {
+    /// `session/set_config_option` with this config id and value.
+    Config { id: String, value: String },
+    /// `session/set_mode` with this mode id.
+    Mode(String),
+}
+
+/// The working mode to use instead of plan: `build` (opencode), else `default`, else the first other one.
+fn working_mode(ids: &[String]) -> Option<String> {
+    ["build", "default"]
+        .iter()
+        .find(|w| ids.iter().any(|m| m == *w))
+        .map(|w| w.to_string())
+        .or_else(|| ids.iter().find(|m| *m != "plan").cloned())
+}
+
+/// What to switch to when a `session/new` result says the session is in plan mode.
+fn leave_plan(created: &Value) -> Option<LeavePlan> {
+    let config = created.get("configOptions").and_then(Value::as_array).and_then(|opts| {
+        opts.iter().find(|o| {
+            o.get("category").and_then(Value::as_str) == Some("mode") || o.get("id").and_then(Value::as_str) == Some("mode")
+        })
+    });
+    if let Some(o) = config {
+        if o.get("currentValue").and_then(Value::as_str) != Some("plan") {
+            return None;
+        }
+        let values: Vec<String> = o
+            .get("options")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.get("value")?.as_str().map(str::to_string))
+            .collect();
+        return Some(LeavePlan::Config { id: o.get("id")?.as_str()?.to_string(), value: working_mode(&values)? });
+    }
+    let modes = parse_modes(created);
+    if modes.current.as_deref() != Some("plan") {
+        return None;
+    }
+    working_mode(&modes.available).map(LeavePlan::Mode)
+}
+
 /// The models a session offers. Agents report them two ways: a `model` session config option
 /// (`configOptions`, switched with `session/set_config_option`) or the older `models` field
 /// (switched with `session/set_model`); `config_id` says which.
@@ -875,7 +922,8 @@ impl SessionCore {
         Ok(json!({}))
     }
 
-    async fn handshake(&self, meta: Option<Value>) -> Result<()> {
+    /// Opens the session; the answer says how to leave plan mode when it opened in it.
+    async fn handshake(&self, meta: Option<Value>) -> Result<Option<LeavePlan>> {
         let init = self
             .rpc
             .request(
@@ -921,7 +969,25 @@ impl SessionCore {
         let _ = self.session_id.set(session_id.to_string());
         *self.modes.lock().unwrap() = parse_modes(&created);
         *self.models.lock().unwrap() = parse_models(&created);
-        Ok(())
+        Ok(leave_plan(&created))
+    }
+
+    /// Switches a session that opened in plan mode to the agent's working mode.
+    async fn leave_plan(&self, how: LeavePlan) -> Result<()> {
+        match how {
+            LeavePlan::Mode(id) => self.set_mode(&id).await,
+            LeavePlan::Config { id, value } => {
+                let sent = self.rpc.request(
+                    "session/set_config_option",
+                    json!({ "sessionId": self.session_id(), "configId": id, "value": value }),
+                );
+                match tokio::time::timeout(self.mode_timeout, sent).await {
+                    Err(_) => Err(AcpError("The agent did not answer the mode change".into())),
+                    Ok(Err(e)) => Err(AcpError(e.message)),
+                    Ok(Ok(_)) => Ok(()),
+                }
+            }
+        }
     }
 
     /// Tells the UI the session's models (nothing when the agent reports none).
@@ -1360,7 +1426,13 @@ impl AgentSession {
             supervisor: Mutex::new(Some(supervisor)),
         };
         match tokio::time::timeout(start_timeout, session.core.handshake(options.meta)).await {
-            Ok(Ok(())) => {
+            Ok(Ok(plan)) => {
+                // A failed switch out of plan mode keeps the session rather than failing the start.
+                if let Some(how) = plan {
+                    if let Err(e) = session.core.leave_plan(how).await {
+                        eprintln!("[agent {}] couldn't leave plan mode: {e}", session.core.chat_id);
+                    }
+                }
                 // The model picked for this agent, when it still offers it; a failed switch keeps
                 // the agent's own default rather than failing the start.
                 if let Some(want) = options.model.as_deref() {
@@ -1673,6 +1745,24 @@ mod tests {
         assert_eq!(m.available, vec!["default".to_string(), "auto".to_string()]);
         assert_eq!(m.current.as_deref(), Some("default"));
         assert_eq!(parse_modes(&json!({})), ModeState::default());
+    }
+
+    #[test]
+    fn plan_mode_is_left_for_the_working_mode() {
+        let opencode = json!({"configOptions": [
+            {"id": "model", "category": "model", "currentValue": "x", "options": [{"value": "x"}]},
+            {"id": "mode", "category": "mode", "currentValue": "plan", "options": [{"value": "build"}, {"value": "plan"}]}]});
+        assert_eq!(leave_plan(&opencode), Some(LeavePlan::Config { id: "mode".into(), value: "build".into() }));
+        let claude = json!({"modes": {"currentModeId": "plan",
+            "availableModes": [{"id": "default"}, {"id": "acceptEdits"}, {"id": "plan"}]}});
+        assert_eq!(leave_plan(&claude), Some(LeavePlan::Mode("default".into())));
+        let other = json!({"modes": {"currentModeId": "plan", "availableModes": [{"id": "plan"}, {"id": "write"}]}});
+        assert_eq!(leave_plan(&other), Some(LeavePlan::Mode("write".into())));
+        // Already working, or nothing to switch to: left alone.
+        let building = json!({"configOptions": [{"id": "mode", "category": "mode", "currentValue": "build", "options": [{"value": "build"}, {"value": "plan"}]}]});
+        assert_eq!(leave_plan(&building), None);
+        assert_eq!(leave_plan(&json!({"modes": {"currentModeId": "plan", "availableModes": [{"id": "plan"}]}})), None);
+        assert_eq!(leave_plan(&json!({})), None);
     }
 
     #[test]
