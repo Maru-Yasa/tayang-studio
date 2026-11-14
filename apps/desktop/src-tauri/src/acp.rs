@@ -1107,24 +1107,36 @@ impl SessionCore {
         self.session_id.get().map(String::as_str).unwrap_or_default()
     }
 
-    /// Runs one `session/prompt` turn and reports how it ended.
+    /// Runs one `session/prompt` turn and reports how it ended. When the agent refuses the turn
+    /// because the account can't use the model in use, the turn is sent again on another model
+    /// the agent offers (a few times at most).
     async fn run_turn(&self, prompt: Vec<Value>) {
-        let request = self.rpc.request("session/prompt", json!({ "sessionId": self.session_id(), "prompt": prompt }));
-        let res = match &self.error_log {
-            None => request.await,
-            Some(log) => {
-                let from = std::fs::metadata(log).map(|m| m.len()).unwrap_or(0);
-                tokio::select! {
-                    r = request => r,
-                    message = watch_error_log(log.clone(), from, self.session_id().to_string()) => {
-                        // The agent won't answer this turn: stop it, and say why.
-                        let _ = self.rpc.notify("session/cancel", json!({ "sessionId": self.session_id() }));
-                        self.permissions.cancel_session(self.uid);
-                        self.prompting.store(false, Ordering::SeqCst);
-                        self.emit(AgentUpdate::Error { message });
-                        return;
+        let mut refused: Vec<String> = Vec::new();
+        let mut retries = 0;
+        let res = loop {
+            let Some(res) = self.prompt_once(&prompt).await else { return };
+            match &res {
+                Err(e) if !e.is_closed() && e.code != AUTH_REQUIRED && is_unsupported_model(&e.message) => {
+                    if retries >= MODEL_RETRIES {
+                        break res;
                     }
+                    retries += 1;
+                    let next = {
+                        let models = self.models.lock().unwrap();
+                        let Some(m) = models.as_ref() else { break res };
+                        refused.extend(m.current.clone());
+                        refused.extend(refused_model_name(&e.message));
+                        fallback_model(m, &refused)
+                    };
+                    let Some(next) = next else { break res };
+                    if let Err(err) = self.set_model(&next).await {
+                        eprintln!("[agent {}] couldn't switch to the model {next}: {err}", self.chat_id);
+                        break res;
+                    }
+                    eprintln!("[agent {}] the model was refused ({}); trying {next}", self.chat_id, e.message);
+                    self.emit_models();
                 }
+                _ => break res,
             }
         };
         self.prompting.store(false, Ordering::SeqCst);
@@ -1145,6 +1157,28 @@ impl SessionCore {
             Err(e) => AgentUpdate::Error { message: format!("The agent reported an error: {}", e.message) },
         };
         self.emit(update);
+    }
+
+    /// Sends one `session/prompt`. `None` when the error log already ended the turn (and said why).
+    async fn prompt_once(&self, prompt: &[Value]) -> Option<std::result::Result<Value, RpcError>> {
+        let request = self.rpc.request("session/prompt", json!({ "sessionId": self.session_id(), "prompt": prompt }));
+        match &self.error_log {
+            None => Some(request.await),
+            Some(log) => {
+                let from = std::fs::metadata(log).map(|m| m.len()).unwrap_or(0);
+                tokio::select! {
+                    r = request => Some(r),
+                    message = watch_error_log(log.clone(), from, self.session_id().to_string()) => {
+                        // The agent won't answer this turn: stop it, and say why.
+                        let _ = self.rpc.notify("session/cancel", json!({ "sessionId": self.session_id() }));
+                        self.permissions.cancel_session(self.uid);
+                        self.prompting.store(false, Ordering::SeqCst);
+                        self.emit(AgentUpdate::Error { message });
+                        None
+                    }
+                }
+            }
+        }
     }
 
     /// Appends this turn's usage to the usage log. Best effort: a failed write is ignored.
@@ -1258,6 +1292,44 @@ pub fn opencode_turn_error(log: &str, session_id: &str) -> Option<String> {
     } else {
         format!("The agent's model failed: {detail}")
     })
+}
+
+/// How many other models a refused turn is tried on before the error is shown.
+const MODEL_RETRIES: usize = 3;
+
+/// The agent refused the turn because the account can't use the model, e.g. Codex signed in with
+/// ChatGPT: "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account".
+pub fn is_unsupported_model(message: &str) -> bool {
+    let m = message.to_lowercase();
+    m.contains("model_not_found")
+        || (m.contains("model")
+            && ["not supported", "does not exist", "not available", "do not have access", "don't have access"]
+                .iter()
+                .any(|p| m.contains(p)))
+}
+
+/// The model named in quotes in a refusal ("The 'gpt-5.5' model ...").
+fn refused_model_name(message: &str) -> Option<String> {
+    let start = message.find("The '")? + 5;
+    let len = message[start..].find('\'')?;
+    Some(message[start..start + len].to_string()).filter(|n| !n.is_empty())
+}
+
+/// Whether an offered model is one of the refused ones, also when the agent lists a model once
+/// per reasoning effort ("gpt-5.5/high", "gpt-5.5[high]").
+fn is_refused(value: &str, refused: &[String]) -> bool {
+    refused.iter().any(|r| {
+        value == r
+            || value.starts_with(&format!("{r}/"))
+            || value.starts_with(&format!("{r}["))
+            || value.ends_with(&format!("/{r}"))
+            || value.contains(&format!("/{r}/"))
+    })
+}
+
+/// The first offered model that isn't refused, to try the turn on.
+fn fallback_model(models: &ModelState, refused: &[String]) -> Option<String> {
+    models.options.iter().map(|o| o.value.clone()).find(|v| Some(v) != models.current.as_ref() && !is_refused(v, refused))
 }
 
 fn auth_message(e: &RpcError) -> String {
@@ -1745,6 +1817,31 @@ mod tests {
         assert_eq!(m.available, vec!["default".to_string(), "auto".to_string()]);
         assert_eq!(m.current.as_deref(), Some("default"));
         assert_eq!(parse_modes(&json!({})), ModeState::default());
+    }
+
+    #[test]
+    fn a_refused_model_falls_back_to_another_offered_one() {
+        let codex = "Internal error ({\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.\",\"code\":\"model_not_found\"}})";
+        assert!(is_unsupported_model(codex));
+        assert!(is_unsupported_model("The model `o9` does not exist or you do not have access to it."));
+        assert!(!is_unsupported_model("quota exceeded"));
+        assert!(!is_unsupported_model("The agent's model failed: overloaded"));
+        assert_eq!(refused_model_name(codex).as_deref(), Some("gpt-5.5"));
+        let pick = |current: &str, values: &[&str], refused: &[&str]| {
+            let m = ModelState {
+                config_id: None,
+                current: Some(current.into()),
+                options: values.iter().map(|v| ModelChoice { value: v.to_string(), name: v.to_string(), description: None }).collect(),
+            };
+            fallback_model(&m, &refused.iter().map(|r| r.to_string()).collect::<Vec<_>>())
+        };
+        assert_eq!(pick("gpt-5.5", &["gpt-5.5", "gpt-5.4"], &["gpt-5.5"]).as_deref(), Some("gpt-5.4"));
+        // A model listed once per reasoning effort is skipped as a whole.
+        assert_eq!(
+            pick("gpt-5.5/medium", &["gpt-5.5/low", "gpt-5.5/medium", "gpt-5.4/medium"], &["gpt-5.5/medium", "gpt-5.5"]).as_deref(),
+            Some("gpt-5.4/medium")
+        );
+        assert_eq!(pick("a", &["a"], &["a"]), None);
     }
 
     #[test]
