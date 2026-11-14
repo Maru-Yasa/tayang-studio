@@ -351,6 +351,13 @@ function handle(msg) {
         send({ id, error: { code: -32602, message: "unknown session" } });
         return;
       }
+      // --refuse-model: the account can't use "fast" (like Codex signed in with ChatGPT);
+      // --refuse-all-models: it can't use any of them.
+      if (process.argv.includes("--refuse-all-models") || (process.argv.includes("--refuse-model") && currentModel === "fast")) {
+        const details = `{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The '${currentModel}' model is not supported when using Codex with a ChatGPT account.","code":"model_not_found"}}`;
+        send({ id, error: { code: -32603, message: "Internal error", data: { details } } });
+        return;
+      }
       if (params.prompt?.some((b) => b.type === "text" && b.text.trim() === "fail")) {
         send({ id, error: { code: -32603, message: "Internal error", data: { details: "quota exceeded" } } });
         return;

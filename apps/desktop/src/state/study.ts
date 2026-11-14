@@ -21,7 +21,7 @@ import {
 } from '@/lib/ipc';
 import { i18n } from '@/i18n';
 import { stored } from '@/lib/stored';
-import { agentErrorText } from '@/lib/agents';
+import { agentErrorText, trackAgentError } from '@/lib/agents';
 import { onAgentUpdate, onPermission } from '@/lib/events';
 import { refreshJobs } from '@/state/jobs';
 import { track } from '@/lib/analytics';
@@ -217,7 +217,10 @@ export const useStudy = create<StudyState>((set, get) => {
           if (update.toolCallId.startsWith('auto-')) set((s) => ({ ranLog: [...s.ranLog, update.title] }));
           else set((s) => ({ toolCalls: s.toolCalls + (update.status === 'done' ? 1 : 0) }));
         }
-        else if (update.kind === 'error') void fail(agentErrorText(update.message, agent), agentErrorText(update.message, agent, 'en'));
+        else if (update.kind === 'error') {
+          trackAgentError(update.message, agent);
+          void fail(agentErrorText(update.message, agent), agentErrorText(update.message, agent, 'en'));
+        }
         else if (update.kind === 'done') void finish();
       }),
       onPermission((req) => {

@@ -20,6 +20,7 @@ export const STORED_KEYS = [
   'errors.signIn',
   'errors.signInClaude',
   'errors.opencodeFreeLimit',
+  'errors.modelUnavailable',
   'chat.ranWithoutAsking',
   'chat.busyNote',
   'chat.switched',

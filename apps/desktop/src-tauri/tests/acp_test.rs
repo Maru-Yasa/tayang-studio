@@ -934,3 +934,29 @@ async fn an_opencode_session_opened_in_plan_leaves_it_for_build() {
     assert_eq!(last_models(&sink).unwrap().0.as_deref(), Some("fast"));
     manager.stop("c1").await.unwrap();
 }
+
+// Codex signed in with ChatGPT refuses some models ("The 'gpt-5.5' model is not supported when
+// using Codex with a ChatGPT account"): the turn is sent again on a model the agent offers.
+#[tokio::test]
+async fn a_turn_refused_for_its_model_is_retried_on_another() {
+    let ws = workspace();
+    let (manager, sink) = started_with_model(&ws, &["--config-models", "--refuse-model"], None).await;
+    ask(&manager, &sink, "model").await;
+    assert_eq!(sink.texts().last().map(String::as_str), Some("model smart-free"));
+    assert!(!sink.updates().iter().any(|u| matches!(u, AgentUpdate::Error { .. })));
+    assert_eq!(last_models(&sink).unwrap().0.as_deref(), Some("smart-free"));
+    manager.stop("c1").await.unwrap();
+}
+
+#[tokio::test]
+async fn a_turn_refused_on_every_model_reports_the_refusal() {
+    let ws = workspace();
+    let (manager, sink) = started_with_model(&ws, &["--legacy-models", "--refuse-all-models"], None).await;
+    ask(&manager, &sink, "hi").await;
+    let error = sink.updates().into_iter().find_map(|u| match u {
+        AgentUpdate::Error { message } => Some(message),
+        _ => None,
+    });
+    assert!(error.unwrap().contains("not supported when using Codex"));
+    manager.stop("c1").await.unwrap();
+}
