@@ -985,6 +985,17 @@ describe('ChatProject render and jobs', () => {
     expect(ipc.updateProject).not.toHaveBeenCalled();
   });
 
+  it('says there is nothing to render yet without calling it a failure or asking the agent', async () => {
+    const user = userEvent.setup();
+    vi.mocked(ipc.mediaRender).mockRejectedValue('nothing to render yet');
+    render(<ChatProject chatId="c1" />);
+    await screen.findByText('Kenapa rupiah melemah?', { selector: 'span' });
+    await user.click(screen.getByRole('button', { name: 'Render video' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Nothing to render yet. Ask your agent to make the video first');
+    expect(screen.queryByText(/Couldn't render/)).not.toBeInTheDocument();
+    expect(ipc.agentPrompt).not.toHaveBeenCalled();
+  });
+
   it('tells the agent when the render fails, with the error, so it can fix the project', async () => {
     const user = userEvent.setup();
     vi.mocked(ipc.mediaRender).mockRejectedValue(new Error('hyperframes render failed: No composition found. No index.html file found.'));

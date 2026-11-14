@@ -15,6 +15,7 @@ import {
   mediaRender,
   mediaThumbnails,
 } from '@/lib/ipc';
+import { NOTHING_TO_RENDER } from '@/lib/renderErrors';
 import { useElapsed } from '@/components/Activity';
 import { useChat } from '@/state/chat';
 import { useRender } from '@/state/render';
@@ -133,7 +134,8 @@ export function Preview({
       await mediaRender(projectId);
       void advanceProject(projectId, 'rendered');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message === NOTHING_TO_RENDER ? t('chat.nothingToRender') : message);
     } finally {
       setRendering(false);
       // Ending the run reloads the preview.

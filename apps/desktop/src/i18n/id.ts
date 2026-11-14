@@ -472,6 +472,7 @@ export const id: Translations = {
     render: 'Render video',
     rendering: 'Merender…',
     couldntRender: 'Belum bisa merender: {{message}}',
+    nothingToRender: 'Belum ada yang bisa dirender. Minta agen kamu membuat videonya dulu',
     renderSentToAgent: 'Sudah dikirim ke agen kamu untuk diperbaiki',
     renderFailedAsk: 'Render-nya gagal. Cari tahu kenapa, perbaiki, lalu kabari aku kalau sudah bisa dirender.',
     renderCommand: 'Perintah render',
