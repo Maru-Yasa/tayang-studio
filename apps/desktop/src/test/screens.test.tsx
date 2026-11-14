@@ -19,6 +19,7 @@ vi.mock('@/lib/ipc', () => ({
   listProjects: vi.fn(),
   videoThumbnail: vi.fn().mockResolvedValue(null),
   showVideoInFolder: vi.fn().mockResolvedValue(undefined),
+  deleteVideo: vi.fn().mockResolvedValue(undefined),
   updateProject: vi.fn(),
   setSchedule: vi.fn(),
   setPosted: vi.fn(),
@@ -187,6 +188,33 @@ describe('Videos', () => {
     expect(ipc.showVideoInFolder).toHaveBeenCalledWith('a');
     await userEvent.click(screen.getByRole('button', { name: 'Show Draft one in its folder' }));
     expect(ipc.showVideoInFolder).toHaveBeenCalledWith('b');
+  });
+
+  it('deletes a video after asking, and it leaves the list', async () => {
+    vi.mocked(ipc.listProjects).mockResolvedValue([project('a', 'Old one', 'rendered'), project('b', 'Kept one', 'draft')]);
+    render(<Videos />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete Old one' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/moves its folder to the trash/)).toBeInTheDocument();
+    // Cancelling deletes nothing.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(ipc.deleteVideo).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Delete Old one' }));
+    vi.mocked(ipc.listProjects).mockResolvedValue([project('b', 'Kept one', 'draft')]);
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete video' }));
+    expect(ipc.deleteVideo).toHaveBeenCalledWith('a');
+    await waitFor(() => expect(screen.queryByText('Old one')).not.toBeInTheDocument());
+    expect(screen.getAllByText('Kept one').length).toBeGreaterThan(0);
+  });
+
+  it('keeps the video and says why when deleting fails', async () => {
+    vi.mocked(ipc.listProjects).mockResolvedValue([project('a', 'Busy one', 'building')]);
+    vi.mocked(ipc.deleteVideo).mockRejectedValueOnce('This video is still being made. Wait for it to finish, then delete it');
+    render(<Videos />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete Busy one' }));
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete video' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('still being made');
+    expect(screen.getAllByText('Busy one').length).toBeGreaterThan(0);
   });
 
   it('shows the empty state', async () => {
