@@ -2014,6 +2014,37 @@ pub async fn show_video_in_folder(app: AppHandle, state: State<'_, AppState>, pr
     }
 }
 
+/// Deletes a video from Tayang > Videos: its project folder goes to the system trash (a folder
+/// already gone is fine) and the video leaves the list. Its chats stop and move to the archive with
+/// their messages; deleting them stays with the archive. Refused while the video is being made.
+#[tauri::command]
+pub async fn delete_video(state: State<'_, AppState>, project_id: String) -> CmdResult<()> {
+    let Some(project) = state.db.get_project(&project_id).map_err(err)? else {
+        return Ok(());
+    };
+    let busy = state.db.list_jobs().map_err(err)?.into_iter().any(|j| {
+        j.project_id.as_deref() == Some(project_id.as_str()) && j.status == crate::types::JobStatus::Working
+    });
+    if busy {
+        return Err("This video is still being made. Wait for it to finish, then delete it".into());
+    }
+    for chat in state.db.list_chats(Some(&project_id)).map_err(err)? {
+        let _ = state.acp.stop(&chat.id).await;
+    }
+    let folder = PathBuf::from(&project.folder);
+    if folder.exists() {
+        if !crate::projects::is_project_folder(&folder, &project.slug) {
+            return Err(format!("Tayang can only delete a video's own folder, not {}", folder.display()));
+        }
+        tauri::async_runtime::spawn_blocking(move || trash::delete(&folder))
+            .await
+            .map_err(err)?
+            .map_err(|e| format!("Couldn't move the video's folder to the trash: {e}"))?;
+    }
+    state.db.delete_video(&project_id).map_err(err)?;
+    Ok(())
+}
+
 /// The newest `*.mp4` where renders land (empty too), for spotting a render that is being written.
 #[tauri::command]
 pub async fn newest_video_info(state: State<'_, AppState>, project_id: String) -> CmdResult<Option<crate::types::FileInfo>> {

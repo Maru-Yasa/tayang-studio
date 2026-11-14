@@ -196,6 +196,7 @@ pub fn run() {
             commands::media_latest_render,
             commands::latest_render_info,
             commands::show_video_in_folder,
+            commands::delete_video,
             commands::newest_video_info,
             commands::video_thumbnail,
             commands::recent_images,
