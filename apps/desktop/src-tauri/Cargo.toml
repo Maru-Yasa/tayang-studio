@@ -32,6 +32,7 @@ tauri-plugin-autostart = "=2.7.0"
 tauri-plugin-single-instance = "=2.5.5"
 tauri-plugin-updater = "=2.14.0"
 tauri-plugin-process = "=2.4.0"
+trash = "5"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

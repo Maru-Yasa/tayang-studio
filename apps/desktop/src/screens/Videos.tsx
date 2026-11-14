@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CalendarClock, FolderOpen, Search } from 'lucide-react';
+import { CalendarClock, FolderOpen, Search, Trash2 } from 'lucide-react';
 import type { Project, ProjectStatus } from '@tayang/shared';
 import { Button } from '@/components/Button';
 import { Oyen } from '@/components/Oyen';
 import { ScheduleDialog } from '@/components/ScheduleDialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SmallPoster, useVideoThumb } from '@/components/VideoPoster';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { locale } from '@/i18n';
-import { listProjects, showVideoInFolder } from '@/lib/ipc';
+import { deleteVideo, listProjects, showVideoInFolder } from '@/lib/ipc';
 import { openProjectChat } from '@/lib/openProject';
 import { ago, mmss } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,9 @@ export function Videos() {
   const [tab, setTab] = useState<Tab>('all');
   const [q, setQ] = useState('');
   const [scheduleFor, setScheduleFor] = useState<Project | null>(null);
+  const [deleteFor, setDeleteFor] = useState<Project | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   // Statuses move on by themselves (a chat builds, a render finishes): follow them.
   const version = useApp((s) => s.projectsVersion);
 
@@ -51,6 +55,24 @@ export function Videos() {
       alive = false;
     };
   }, [version]);
+
+  const confirmDelete = async () => {
+    if (!deleteFor) return;
+    const gone = deleteFor;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteVideo(gone.id);
+      setProjects((l) => l && l.filter((x) => x.id !== gone.id));
+      setDeleteFor(null);
+      // The sidebar's chats and the board's cards moved to the archive.
+      useApp.getState().bumpProjects();
+    } catch (e) {
+      setDeleteError(t('videos.deleteFailed', { message: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const list = projects ?? [];
   const shown = useMemo(() => {
@@ -105,12 +127,20 @@ export function Videos() {
             <span className="hidden w-14 shrink-0 @2xl:block">{t('videos.columns.length')}</span>
             <span className="hidden w-40 shrink-0 @3xl:block">{t('videos.columns.schedule')}</span>
             <span className="hidden w-24 shrink-0 text-right @xl:block">{t('videos.columns.updated')}</span>
-            {/* The folder and schedule buttons. */}
-            <span className="w-[72px] shrink-0" />
+            {/* The folder, schedule and delete buttons. */}
+            <span className="w-[112px] shrink-0" />
           </div>
           <ul aria-label={t('videos.title')} className="m-0 flex list-none flex-col p-0">
             {shown.map((p) => (
-              <VideoRow key={p.id} project={p} onSchedule={() => setScheduleFor(p)} />
+              <VideoRow
+                key={p.id}
+                project={p}
+                onSchedule={() => setScheduleFor(p)}
+                onDelete={() => {
+                  setDeleteError(null);
+                  setDeleteFor(p);
+                }}
+              />
             ))}
           </ul>
           {shown.length === 0 && <p className="m-0 px-3 py-6 text-sm text-text-3">{t('videos.noMatch')}</p>}
@@ -122,6 +152,27 @@ export function Videos() {
         project={scheduleFor}
         onSaved={(saved) => setProjects((l) => l && l.map((x) => (x.id === saved.id ? saved : x)))}
       />
+      <Dialog open={deleteFor !== null} onOpenChange={(o) => !o && !deleting && setDeleteFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('videos.deleteTitle', { title: deleteFor?.title ?? '' })}</DialogTitle>
+            <DialogDescription>{t('videos.deleteBody')}</DialogDescription>
+          </DialogHeader>
+          {deleteError && (
+            <p role="alert" className="m-0 text-sm text-orange-light">
+              {deleteError}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" disabled={deleting} onClick={() => setDeleteFor(null)}>
+              {t('videos.deleteCancel')}
+            </Button>
+            <Button disabled={deleting} onClick={() => void confirmDelete()}>
+              {t('videos.deleteConfirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -129,9 +180,9 @@ export function Videos() {
 /**
  * One video as a compact row: its picture, title and kind, status, length, schedule and when it last
  * changed. The row opens the video's chat (where everything else is); the folder button shows its newest
- * render (or its project folder) in the file manager; the clock schedules it.
+ * render (or its project folder) in the file manager; the clock schedules it; the bin deletes it.
  */
-function VideoRow({ project: p, onSchedule }: { project: Project; onSchedule(): void }) {
+function VideoRow({ project: p, onSchedule, onDelete }: { project: Project; onSchedule(): void; onDelete(): void }) {
   const { t } = useTranslation();
   const thumb = useVideoThumb(p);
   const at = p.scheduledAt && !Number.isNaN(new Date(p.scheduledAt).getTime()) ? new Date(p.scheduledAt) : null;
@@ -168,8 +219,8 @@ function VideoRow({ project: p, onSchedule }: { project: Project; onSchedule(): 
         )}
       </span>
       <span className="pointer-events-none hidden w-24 shrink-0 text-right text-xs text-text-3 @xl:block">{ago(p.updatedAt)}</span>
-      {/* The folder and schedule buttons, together as wide as the header's last column. */}
-      <span className="relative flex w-[72px] shrink-0 items-center justify-end gap-2">
+      {/* The folder, schedule and delete buttons, together as wide as the header's last column. */}
+      <span className="relative flex w-[112px] shrink-0 items-center justify-end gap-2">
         <button
           type="button"
           aria-label={t('videos.showInFolderFor', { title: p.title })}
@@ -190,6 +241,15 @@ function VideoRow({ project: p, onSchedule }: { project: Project; onSchedule(): 
           )}
         >
           <CalendarClock size={16} strokeWidth={1.5} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label={t('videos.deleteFor', { title: p.title })}
+          title={t('videos.delete')}
+          onClick={onDelete}
+          className="relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-text-3 opacity-0 group-hover:opacity-100 hover:bg-raised hover:text-foreground focus-visible:opacity-100"
+        >
+          <Trash2 size={16} strokeWidth={1.5} aria-hidden="true" />
         </button>
       </span>
     </li>

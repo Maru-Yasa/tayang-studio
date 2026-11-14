@@ -196,6 +196,8 @@ export const recentImages = (chatId: string, since: string, limit: number) =>
   invoke<FileInfo[]>('recent_images', { chatId, since, limit });
 /** The newest render with its size and time; null when the project has none. */
 /** Shows a video in the file manager: its newest render selected, or its project folder without one. */
+/** Deletes a video: its folder goes to the system trash, its chats to the archive. Refused while it is being made. */
+export const deleteVideo = (projectId: string) => invoke<void>('delete_video', { projectId });
 export const showVideoInFolder = (projectId: string) => invoke<void>('show_video_in_folder', { projectId });
 export const latestRenderInfo = (projectId: string) => invoke<FileInfo | null>('latest_render_info', { projectId });
 /** The newest mp4 where renders land (renders/, the root, out/, runs/<run>/out/), still-empty ones too (a render being written); null when there is none. */

@@ -463,6 +463,35 @@ impl Db {
         Ok(())
     }
 
+    /// Deletes a video's row. Its chats and cards stay, archived and no longer tied to it; the ids of
+    /// those chats come back. Refused while one of its cards is working: the video is still being made.
+    pub fn delete_video(&self, id: &str) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let tx = conn.unchecked_transaction()?;
+        let working: i64 =
+            tx.query_row("SELECT COUNT(*) FROM jobs WHERE project_id = ?1 AND status = 'working'", [id], |r| r.get(0))?;
+        if working > 0 {
+            return Err(DbError("This video is still being made. Wait for it to finish, then delete it".into()));
+        }
+        let chats = {
+            let mut stmt = tx.prepare("SELECT id FROM chats WHERE project_id = ?1")?;
+            let rows = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let stamp = now();
+        tx.execute(
+            "UPDATE chats SET archived_at = COALESCE(archived_at, ?2), project_id = NULL WHERE project_id = ?1",
+            rusqlite::params![id, stamp],
+        )?;
+        tx.execute(
+            "UPDATE jobs SET archived_at = COALESCE(archived_at, ?2), project_id = NULL WHERE project_id = ?1",
+            rusqlite::params![id, stamp],
+        )?;
+        tx.execute("DELETE FROM projects WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(chats)
+    }
+
     pub fn get_project(&self, id: &str) -> Result<Option<Project>> {
         let sql = format!("{PROJECT_SELECT} WHERE id = ?1");
         Ok(query_as::<Project>(&self.conn(), &sql, &[&id])?.into_iter().next())
@@ -1404,6 +1433,58 @@ mod tests {
         assert_eq!(updated.title, "Fix intro");
         assert_eq!(db.get_chat(&chat.id).unwrap().unwrap().agent_id, AgentId::Codex);
         assert_eq!(db.set_chat_agent("nope", AgentId::Gemini).unwrap(), None);
+    }
+
+    #[test]
+    fn deleting_a_video_keeps_its_chats_and_cards_in_the_archive() {
+        let db = db();
+        db.insert_project(&project("a", "2026-01-01T00:00:00Z")).unwrap();
+        db.insert_project(&project("b", "2026-01-01T00:00:00Z")).unwrap();
+        let first = db.create_chat(Some("a"), AgentId::Claude, "First").unwrap();
+        let second = db.create_chat(Some("a"), AgentId::Codex, "Second").unwrap();
+        let other = db.create_chat(Some("b"), AgentId::Claude, "Other").unwrap();
+        db.add_message(&first.id, MessageRole::User, &[]).unwrap();
+        let card = |id: &str, project: &str, status| Job {
+            id: id.into(),
+            kind: JobKind::Render,
+            title: "Render".into(),
+            project_id: Some(project.into()),
+            chat_id: None,
+            agent_id: AgentId::Claude,
+            status,
+            progress: None,
+            note: None,
+            source_url: None,
+            render_baseline_at: None,
+            archived_at: None,
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        };
+        db.upsert_job(&card("j1", "a", JobStatus::Done)).unwrap();
+        db.upsert_job(&card("j2", "b", JobStatus::Working)).unwrap();
+
+        // A video still being made isn't deleted.
+        assert!(db.delete_video("b").is_err());
+        assert!(db.get_project("b").unwrap().is_some());
+
+        let chats = db.delete_video("a").unwrap();
+        assert_eq!(chats.len(), 2);
+        assert!(db.get_project("a").unwrap().is_none());
+        // Its chats keep their messages, now archived and no longer tied to the video.
+        for id in [&first.id, &second.id] {
+            let c = db.get_chat(id).unwrap().unwrap();
+            assert_eq!(c.project_id, None);
+        }
+        assert_eq!(db.list_messages(&first.id).unwrap().len(), 1);
+        let archived = db.list_archived_chats().unwrap();
+        assert_eq!(archived.len(), 2);
+        assert!(db.list_recent_chats(None).unwrap().iter().all(|c| c.id == other.id));
+        // Its cards go to the archive too.
+        let j1 = db.list_jobs().unwrap().into_iter().find(|j| j.id == "j1").unwrap();
+        assert_eq!(j1.project_id, None);
+        assert!(j1.archived_at.is_some());
+        // Another video's chat is untouched; a missing one is fine.
+        assert_eq!(db.get_chat(&other.id).unwrap().unwrap().project_id.as_deref(), Some("b"));
+        assert!(db.delete_video("gone").unwrap().is_empty());
     }
 
     #[test]
