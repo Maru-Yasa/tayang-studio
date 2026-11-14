@@ -1,5 +1,6 @@
 import type { AgentId } from '@tayang/shared';
 import { i18n } from '@/i18n';
+import { trackError } from '@/lib/analytics';
 
 export const AGENT_NAMES: Record<AgentId, string> = {
   claude: 'Claude Code',
@@ -32,6 +33,26 @@ const SIGN_IN_COMMAND: Record<AgentId, string> = {
   custom: '',
 };
 
+/** The account can't use the model, e.g. Codex signed in with ChatGPT: "The 'gpt-5.5' model is not
+ * supported when using Codex with a ChatGPT account". Rust already tried the other models it offers
+ * (`run_turn` in acp.rs), so this is what's left to say. Keep in step with `is_unsupported_model`. */
+const UNSUPPORTED_MODEL = /model_not_found|model\b.*\b(not supported|does not exist|not available|do(?: not|n't) have access)/i;
+
+/** Whether an agent error says the account can't use the model. */
+export function isUnsupportedModel(message: string | null | undefined): boolean {
+  return UNSUPPORTED_MODEL.test(message ?? '');
+}
+
+/** Counts agent errors worth fixing in Tayang, grouped by cause so they don't hide among others. */
+export function trackAgentError(message: string | null | undefined, agent: AgentId): void {
+  if (!isUnsupportedModel(message)) return;
+  trackError(new Error(message ?? ''), 'agent_turn', {
+    agent,
+    $exception_fingerprint: 'agent:model-unavailable',
+    $issue_name: 'Agent: the account cannot use the model',
+  });
+}
+
 /** JSON-RPC -32000 is ACP's "authentication required". */
 const AUTH = /\bauth|sign[ -]?in|log[ -]?in|-32000/i;
 
@@ -39,6 +60,11 @@ const AUTH = /\bauth|sign[ -]?in|log[ -]?in|-32000/i;
  * `lng: 'en'` gives the English text that gets saved with a chat or job (see `lib/stored.ts`). */
 export function agentErrorText(message: string | null | undefined, agent: AgentId, lng?: 'en'): string {
   const msg = (message ?? '').trim();
+  if (isUnsupportedModel(msg)) {
+    const model = /The '([^']+)' model/.exec(msg)?.[1] ?? /model [`"']([^`"']+)[`"']/.exec(msg)?.[1];
+    const opts = lng ? { lng } : {};
+    return i18n.t('errors.modelUnavailable', { agent: AGENT_NAMES[agent], model: model ?? i18n.t('errors.thisModel', opts), ...opts });
+  }
   if (AUTH.test(msg)) {
     const opts = lng ? { lng } : {};
     // Your API has no sign-in: its key was refused.

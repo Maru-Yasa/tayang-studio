@@ -213,6 +213,8 @@ export const en = {
     signInClaude: 'Sign in to Claude first: open Settings › Agents and press Sign in to Claude',
     opencodeFreeLimit: "opencode's free model has reached its usage limit. Pick another model in the model menu, or subscribe to OpenCode Go (opencode.ai/go)",
     agentStopped: 'The agent stopped unexpectedly',
+    thisModel: 'it picked',
+    modelUnavailable: "{{agent}} can't use the model {{model}} with your account. Pick another model in the model menu, or check your plan",
     signIn: 'Sign in to {{agent}}: open a terminal and run {{command}} once, then try again',
     yourAgentCommand: "your agent's command",
     apiKeyRefused: 'Your API key was refused. Check it in Settings › Agents › Your API. The provider said: {{detail}}',

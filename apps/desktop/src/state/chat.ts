@@ -20,7 +20,7 @@ import {
 } from '@/lib/ipc';
 import { onAgentAction, onAgentUpdate, onPermission, onQuestion, type AgentAction } from '@/lib/events';
 import { extractA2ui } from '@/a2ui/parse';
-import { agentErrorText, AGENT_NAMES } from '@/lib/agents';
+import { agentErrorText, AGENT_NAMES, trackAgentError } from '@/lib/agents';
 import { i18n, uiLanguage } from '@/i18n';
 import { stored } from '@/lib/stored';
 import { finishedRender } from '@/lib/renderCheck';
@@ -650,6 +650,7 @@ export const useChat = create<ChatState>((set, get) => {
     endTurnImages(chatId, turnMessage(chatId)?.id, false);
     set((s) => ({ started: { ...s.started, [chatId]: false } }));
     // Saved in English; the chat and the job board say it in the user's language when they show it.
+    trackAgentError(u.message, chatAgent.get(chatId) ?? 'claude');
     const text = agentErrorText(u.message, chatAgent.get(chatId) ?? 'claude', 'en');
     writeJob(chatId, 'failed', text);
     const sys = localMessage(chatId, 'system', [{ type: 'text', text }]);

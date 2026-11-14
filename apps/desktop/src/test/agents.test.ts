@@ -10,6 +10,20 @@ describe('agentErrorText', () => {
     expect(agentErrorText(undefined, 'gemini')).toBe('The agent stopped unexpectedly');
   });
 
+  it('says the account cannot use the model instead of the raw refusal', () => {
+    const codex =
+      'The agent reported an error: Internal error ({"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-5.5\' model is not supported when using Codex with a ChatGPT account.","code":"model_not_found"}})';
+    expect(agentErrorText(codex, 'codex')).toBe(
+      "Codex can't use the model gpt-5.5 with your account. Pick another model in the model menu, or check your plan",
+    );
+    expect(agentErrorText('The agent reported an error: model_not_found', 'opencode')).toBe(
+      "opencode can't use the model it picked with your account. Pick another model in the model menu, or check your plan",
+    );
+    expect(agentErrorText('The agent reported an error: quota exceeded', 'codex')).toBe(
+      'The agent reported an error: quota exceeded',
+    );
+  });
+
   it.each([
     'Authentication required',
     'Please sign in',

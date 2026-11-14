@@ -4,7 +4,7 @@ import { buildInstallPrompt, languageHint } from '@tayang/skills';
 import { uiLanguage } from '@/i18n';
 import { agentCancel, agentPrompt, agentRespondPermission, agentStart, checkTools } from '@/lib/ipc';
 import { i18n } from '@/i18n';
-import { agentErrorText } from '@/lib/agents';
+import { agentErrorText, trackAgentError } from '@/lib/agents';
 import { onAgentUpdate, onPermission } from '@/lib/events';
 
 /** Every install runs in one shared agent chat. */
@@ -106,6 +106,7 @@ export const useInstall = create<InstallState>((set, get) => {
       const promote = cur?.status === 'confirm' && !get().request && update.status !== 'pending';
       patch(tool, { log, ...(promote ? { status: 'running' as const } : {}) });
     } else if (update.kind === 'error') {
+      trackAgentError(update.message, get().agent ?? 'claude');
       fail(tool, agentErrorText(update.message, get().agent ?? 'claude'));
     } else if (update.kind === 'done') {
       // The turn is over: nothing still queued can run.
