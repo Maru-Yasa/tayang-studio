@@ -70,6 +70,16 @@ pub fn create_project_folder(
     Ok((slug, dir))
 }
 
+/// True when `folder` can be a video's own project folder: an absolute path inside some folder,
+/// named after the project's slug. Guards deleting a folder against a bad row (an empty folder, the
+/// working folder itself, a home or root folder).
+pub fn is_project_folder(folder: &Path, slug: &str) -> bool {
+    !slug.is_empty()
+        && folder.is_absolute()
+        && folder.parent().is_some_and(|p| p.parent().is_some())
+        && folder.file_name().is_some_and(|n| n == slug)
+}
+
 /// Writes the same brief to `AGENTS.md` and `CLAUDE.md`.
 pub fn write_project_brief(folder: &Path, brief: &str) -> io::Result<()> {
     fs::write(folder.join("AGENTS.md"), brief)?;
@@ -131,6 +141,16 @@ pub fn ensure_inside(working: &Path, p: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_videos_own_folder_is_its_project_folder() {
+        assert!(is_project_folder(Path::new("/Users/a/Tayang/my-video"), "my-video"));
+        assert!(!is_project_folder(Path::new("/Users/a/Tayang/my-video"), "other"));
+        assert!(!is_project_folder(Path::new("/Users/a/Tayang"), ""));
+        assert!(!is_project_folder(Path::new("/my-video"), "my-video"));
+        assert!(!is_project_folder(Path::new("/"), "my-video"));
+        assert!(!is_project_folder(Path::new("Tayang/my-video"), "my-video"));
+    }
 
     #[test]
     fn slugify_cases() {

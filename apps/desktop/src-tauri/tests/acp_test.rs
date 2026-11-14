@@ -911,3 +911,26 @@ async fn agents_without_models_report_none() {
     assert!(manager.set_model("c1", "fast").await.is_err());
     manager.stop("c1").await.unwrap();
 }
+
+// An agent the user left in plan mode only plans and never makes the video, and Tayang has no
+// mode menu: a session that opens in plan mode is switched to the agent's working mode.
+#[tokio::test]
+async fn a_session_opened_in_plan_mode_leaves_it() {
+    let ws = workspace();
+    let (manager, sink) = started_with_model(&ws, &["--start-in-plan"], None).await;
+    ask(&manager, &sink, "mode").await;
+    assert_eq!(sink.texts().last().map(String::as_str), Some("mode default"));
+    manager.stop("c1").await.unwrap();
+}
+
+// opencode reports its agents (build / plan) as a `mode` config option, not as `modes`.
+#[tokio::test]
+async fn an_opencode_session_opened_in_plan_leaves_it_for_build() {
+    let ws = workspace();
+    let (manager, sink) = started_with_model(&ws, &["--config-mode-plan", "--config-models"], None).await;
+    ask(&manager, &sink, "mode").await;
+    assert_eq!(sink.texts().last().map(String::as_str), Some("mode build"));
+    // The model option is still the one reported.
+    assert_eq!(last_models(&sink).unwrap().0.as_deref(), Some("fast"));
+    manager.stop("c1").await.unwrap();
+}
