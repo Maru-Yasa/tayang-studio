@@ -31,6 +31,7 @@ import { setRenderArgv, useRender } from '@/state/render';
 import { advanceProject } from '@/lib/projectStatus';
 import { cn } from '@/lib/utils';
 import { track, trackError } from '@/lib/analytics';
+import { NOTHING_TO_RENDER, renderErrorKind } from '@/lib/renderErrors';
 
 const NO_MESSAGES: never[] = [];
 /** How often the file sidebar reads its folders again while the agent works. */
@@ -190,7 +191,14 @@ export function ChatProject({ chatId, draft }: { chatId: string; draft?: string 
       setReloadKey((k) => k + 1);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      trackError(e, 'render');
+      // The agent hasn't built the video yet: say so, nothing failed.
+      if (message === NOTHING_TO_RENDER) {
+        setRenderError(t('chat.nothingToRender'));
+        return;
+      }
+      // Grouped by cause: every render error comes from here, so the stack can't tell them apart.
+      const kind = renderErrorKind(message);
+      trackError(e, 'render', { render_error: kind, $exception_fingerprint: `render:${kind}`, $issue_name: `Render failed: ${kind}` });
       // The agent made the project, so it is the one to fix it: tell it what failed, in this chat.
       const asked = askAgentToFixRender(message);
       setRenderError(`${t('chat.couldntRender', { message })}${asked ? ` · ${t('chat.renderSentToAgent')}` : ''}`);

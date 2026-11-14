@@ -119,7 +119,7 @@ export function forgetAccount(installId: string): void {
 }
 
 /** An error in a flow that matters (rendering, posting, a style study), with where it happened. */
-export function trackError(error: unknown, where: string): void {
+export function trackError(error: unknown, where: string, extra?: Record<string, string>): void {
   if (!started || !enabled) return;
-  posthog.captureException(error instanceof Error ? error : new Error(String(error)), { where });
+  posthog.captureException(error instanceof Error ? error : new Error(String(error)), { where, ...extra });
 }
