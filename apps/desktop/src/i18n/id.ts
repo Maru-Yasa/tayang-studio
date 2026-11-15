@@ -1148,6 +1148,13 @@ export const id: Translations = {
     keysFrame: 'frame',
     keysSecond: '1 detik',
     framesChecked: 'Frame sudah dicek',
+    live: 'Live',
+    render: 'Render',
+    liveTitle: 'Pratinjau langsung',
+    liveLoading: 'Menyiapkan pratinjau langsung…',
+    liveTip: 'Diputar langsung dari kode, belum dirender',
+    liveSwitchTip: 'Diputar langsung dari kode. Klik untuk menonton hasil render terakhir',
+    renderSwitchTip: 'Memutar hasil render terakhir. Klik untuk menonton langsung dari kode',
   },
   style: {
     title: 'Gaya',

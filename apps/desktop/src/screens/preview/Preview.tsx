@@ -14,7 +14,13 @@ import {
   mediaProbe,
   mediaRender,
   mediaThumbnails,
+  previewStart,
+  previewStatus,
+  previewStill,
+  previewStop,
+  type PreviewStatus,
 } from '@/lib/ipc';
+import { LIVE_LOADING, createLiveSource, type LiveSource, type LiveState } from '@/lib/liveSource';
 import { NOTHING_TO_RENDER } from '@/lib/renderErrors';
 import { useElapsed } from '@/components/Activity';
 import { useChat } from '@/state/chat';
@@ -23,6 +29,8 @@ import { advanceProject } from '@/lib/projectStatus';
 import { Scrubber, type Scene } from './Scrubber';
 
 const THUMBS = 12;
+/** How often the panel looks again whether the code can be played live, or changed after the render. */
+const STATUS_POLL_MS = 4000;
 const NO_MESSAGES: never[] = [];
 
 /** "● Rendering video… 1m 20s": the agent's or Tayang's render of this project is running. */
@@ -45,6 +53,35 @@ const Kbd = ({ children }: { children: React.ReactNode }) => (
     {children}
   </kbd>
 );
+
+/** "Live" or "Render" in the frame's corner; switches between them when both exist. */
+function SourceBadge({ live, canSwitch, onSwitch }: { live: boolean; canSwitch: boolean; onSwitch(): void }) {
+  const { t } = useTranslation();
+  const label = live ? t('preview.live') : t('preview.render');
+  const className =
+    'absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-ink/75 px-2 py-0.5 text-[11px] leading-4 whitespace-nowrap text-text-2 backdrop-blur-sm';
+  const dot = <span aria-hidden="true" className={cn('inline-block size-1.5 rounded-full', live ? 'bg-primary' : 'bg-text-3')} />;
+  if (!canSwitch) {
+    return (
+      <span data-testid="preview-source" title={live ? t('preview.liveTip') : undefined} className={cn(className, 'pointer-events-none')}>
+        {dot}
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="preview-source"
+      title={live ? t('preview.liveSwitchTip') : t('preview.renderSwitchTip')}
+      onClick={onSwitch}
+      className={cn(className, 'cursor-pointer hover:text-foreground')}
+    >
+      {dot}
+      {label}
+    </button>
+  );
+}
 
 /** The largest box of `aspect` (width / height) that fits a stage of this size; null before it has one. */
 export function frameBox(stageWidth: number, stageHeight: number, aspect: number) {
@@ -74,12 +111,21 @@ export function Preview({
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [info, setInfo] = useState<MediaInfo | null>(null);
   const [thumbs, setThumbs] = useState<string[]>([]);
-  const [frame, setFrame] = useState(0);
-  const [playing, setPlaying] = useState(false);
+  const [renderFrame, setFrame] = useState(0);
+  const [renderPlaying, setPlaying] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Live preview: the project played from its code, no render. `prefer` is the user's pick between the
+  // live preview and the render when both exist; without one, live wins when the code is newer.
+  const [liveStatus, setLiveStatus] = useState<PreviewStatus | null>(null);
+  const [prefer, setPrefer] = useState<'live' | 'render' | null>(null);
+  const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  const [live, setLive] = useState<LiveState>(LIVE_LOADING);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const sourceRef = useRef<LiveSource | null>(null);
 
   // The stage's content size, measured: the frame box is sized from it in px on every platform.
   const [stage, setStage] = useState<{ width: number; height: number } | null>(null);
@@ -100,14 +146,24 @@ export function Preview({
   const lastAgent = [...messages].reverse().find((m) => m.role === 'agent');
   const checked = !!lastAgent?.parts.some((p) => p.type === 'text' && hasFramesChecked(p.text));
 
+  const checkLive = useCallback(async () => {
+    try {
+      const next = await previewStatus(projectId);
+      setLiveStatus((s) => (s && s.engine === next?.engine && s.codeNewer === next?.codeNewer ? s : (next ?? null)));
+    } catch {
+      setLiveStatus(null);
+    }
+  }, [projectId]);
+
   const load = useCallback(async () => {
+    void checkLive();
     const [path, probe] = await Promise.all([mediaLatestRender(projectId), mediaProbe(projectId)]);
     setVideoPath(path);
     setInfo(probe);
     setFrame(0);
     setPlaying(false);
     setThumbs(path && probe ? (await mediaThumbnails(projectId, THUMBS)).map(assetUrl) : []);
-  }, [projectId]);
+  }, [projectId, checkLive]);
 
   useEffect(() => {
     let alive = true;
@@ -124,6 +180,57 @@ export function Preview({
     if (wasRendering.current && !run) load().catch((e) => setError(String(e?.message ?? e)));
     wasRendering.current = !!run;
   }, [run, load]);
+
+  const hasRender = !!videoPath && !!info;
+  const canLive = !!liveStatus?.engine;
+  const mode: 'live' | 'render' | 'none' =
+    prefer === 'render' && hasRender
+      ? 'render'
+      : prefer === 'live' && canLive
+        ? 'live'
+        : canLive && (!hasRender || liveStatus!.codeNewer)
+          ? 'live'
+          : hasRender
+            ? 'render'
+            : 'none';
+  const isLive = mode === 'live';
+
+  // The agent may start writing code (or change it) while the panel is open on a render or on nothing.
+  useEffect(() => {
+    if (isLive) return;
+    const id = setInterval(() => void checkLive(), STATUS_POLL_MS);
+    return () => clearInterval(id);
+  }, [isLive, checkLive]);
+
+  // Start the project's preview server while the live preview shows; stop it when it goes away.
+  useEffect(() => {
+    if (!isLive) return;
+    let alive = true;
+    setLive(LIVE_LOADING);
+    previewStart(projectId)
+      .then((r) => alive && setLiveUrl(r.url))
+      .catch((e) => alive && setLive({ ...LIVE_LOADING, status: 'error', error: e instanceof Error ? e.message : String(e) }));
+    return () => {
+      alive = false;
+      setLiveUrl(null);
+      void previewStop(projectId).catch(() => {});
+    };
+  }, [isLive, projectId]);
+
+  useEffect(() => {
+    if (!liveUrl) return;
+    const source = createLiveSource({
+      target: () => iframeRef.current?.contentWindow,
+      origin: new URL(liveUrl).origin,
+      onChange: setLive,
+    });
+    sourceRef.current = source;
+    window.addEventListener('message', source.onMessage);
+    return () => {
+      window.removeEventListener('message', source.onMessage);
+      sourceRef.current = null;
+    };
+  }, [liveUrl]);
 
   const render = async () => {
     if (onRender) return onRender();
@@ -144,7 +251,7 @@ export function Preview({
   };
 
   const busy = rendering || renderingProp || !!run;
-  if (!videoPath || !info) {
+  if (mode === 'none' || (!isLive && (!videoPath || !info))) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#101010] px-5 text-center">
         {run && <RenderBanner since={run.startedAt} />}
@@ -160,15 +267,20 @@ export function Preview({
     );
   }
 
-  const { fps, durationSec } = info;
-  const total = Math.max(1, Math.round(durationSec * fps));
+  const fps = isLive ? live.fps : info!.fps;
+  const total = isLive ? Math.max(1, live.durationInFrames) : Math.max(1, Math.round(info!.durationSec * info!.fps));
+  const durationSec = isLive ? total / fps : info!.durationSec;
+  const frame = isLive ? live.frame : renderFrame;
+  const playing = isLive ? live.playing : renderPlaying;
   const clamp = (f: number) => Math.min(total - 1, Math.max(0, f));
   const seek = (f: number) => {
+    if (isLive) return sourceRef.current?.seek(f);
     const next = clamp(f);
     setFrame(next);
     if (videoRef.current) videoRef.current.currentTime = secAt(next, fps);
   };
   const toggle = () => {
+    if (isLive) return sourceRef.current?.toggle();
     const v = videoRef.current;
     if (!v) return;
     if (v.paused) void v.play()?.catch(() => {});
@@ -180,7 +292,7 @@ export function Preview({
     setError(null);
     try {
       const timeSec = secAt(frame, fps);
-      const imagePath = await mediaExtractFrame(projectId, timeSec);
+      const imagePath = isLive ? await previewStill(projectId, frame, fps) : await mediaExtractFrame(projectId, timeSec);
       useChat.getState().attach(chatId, { type: 'frame', projectId, frame, timeSec, imagePath, marks: [] });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -201,7 +313,8 @@ export function Preview({
   };
 
   // The frame box takes the video's own shape, as large as the stage allows.
-  const aspect = info.width > 0 && info.height > 0 ? info.width / info.height : 9 / 16;
+  const [w, h] = isLive ? [live.width, live.height] : [info!.width, info!.height];
+  const aspect = w > 0 && h > 0 ? w / h : 9 / 16;
   const box = stage ? frameBox(stage.width, stage.height, aspect) : null;
   const current = formatTimecode(secAt(frame, fps), fps);
   const length = formatTimecode(durationSec, fps);
@@ -231,14 +344,43 @@ export function Preview({
           // Measured: exactly the video's rect. Until then, CSS keeps the shape.
           style={box ? { width: box.width, height: box.height } : { aspectRatio: String(aspect) }}
         >
-          <video
-            ref={videoRef}
-            src={assetUrl(videoPath)}
-            className="h-full w-full object-contain"
-            playsInline
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onTimeUpdate={(e) => setFrame(clamp(frameAt(e.currentTarget.currentTime, fps)))}
+          {isLive ? (
+            <>
+              {liveUrl && (
+                <iframe
+                  ref={iframeRef}
+                  data-testid="live-preview"
+                  title={t('preview.liveTitle')}
+                  src={liveUrl}
+                  // Project code runs here: its own origin (127.0.0.1), no top navigation, no popups.
+                  // i18n-ignore: iframe tokens, not copy
+                  sandbox="allow-scripts allow-same-origin"
+                  // i18n-ignore: iframe tokens, not copy
+                  allow="autoplay"
+                  className="h-full w-full border-0"
+                />
+              )}
+              {live.status === 'loading' && (
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-text-3">
+                  {t('preview.liveLoading')}
+                </span>
+              )}
+            </>
+          ) : (
+            <video
+              ref={videoRef}
+              src={assetUrl(videoPath!)}
+              className="h-full w-full object-contain"
+              playsInline
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onTimeUpdate={(e) => setFrame(clamp(frameAt(e.currentTarget.currentTime, fps)))}
+            />
+          )}
+          <SourceBadge
+            live={isLive}
+            canSwitch={canLive && hasRender}
+            onSwitch={() => setPrefer(isLive ? 'render' : 'live')}
           />
           {checked && (
             <span
@@ -314,9 +456,9 @@ export function Preview({
             <span className="@min-[380px]:hidden">{t('preview.sendFrameShort')}</span>
           </Button>
         </div>
-        {error && (
+        {(error || (isLive && live.error)) && (
           <p role="alert" className="m-0 text-xs text-orange-light">
-            {error}
+            {error ?? live.error}
           </p>
         )}
 

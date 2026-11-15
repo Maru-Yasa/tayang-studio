@@ -1154,6 +1154,13 @@ export const en = {
     keysFrame: 'frame',
     keysSecond: '1 s',
     framesChecked: 'Frames checked',
+    live: 'Live',
+    render: 'Render',
+    liveTitle: 'Live preview',
+    liveLoading: 'Starting live preview…',
+    liveTip: 'Playing from the code, not rendered yet',
+    liveSwitchTip: 'Playing from the code. Click to watch the latest render',
+    renderSwitchTip: 'Playing the latest render. Click to watch live from the code',
   },
   style: {
     title: 'Style',
