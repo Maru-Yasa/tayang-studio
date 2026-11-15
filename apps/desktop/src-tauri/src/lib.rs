@@ -10,6 +10,7 @@ pub mod db;
 pub mod device;
 pub mod files;
 pub mod media;
+pub mod preview;
 pub mod projects;
 pub mod scheduler;
 pub mod skills;
@@ -62,6 +63,7 @@ pub fn run() {
             app.manage(commands::ClaudeSignIn::default());
             app.manage(commands::ApiKeys::new(&data));
             app.manage(commands::EngineInstall::default());
+            app.manage(preview::PreviewServers::default());
             let api_url = styles_sync::effective_api_url(&settings);
             app.manage(AppState {
                 db,
@@ -124,6 +126,10 @@ pub fn run() {
             commands::api_save,
             commands::api_clear,
             commands::engine_install,
+            commands::preview_status,
+            commands::preview_start,
+            commands::preview_stop,
+            commands::preview_still,
             commands::check_tools,
             commands::claude_account,
             commands::claude_sign_in,
@@ -230,6 +236,10 @@ pub fn run() {
         if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
             if let Some(auth) = handle.try_state::<std::sync::Arc<auth::Auth>>() {
                 auth.shutdown();
+            }
+            // Don't leave live preview servers behind.
+            if let Some(servers) = handle.try_state::<preview::PreviewServers>() {
+                servers.stop_all();
             }
             // Don't leave agent processes behind.
             if let Some(state) = handle.try_state::<AppState>() {

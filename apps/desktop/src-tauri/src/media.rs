@@ -31,7 +31,7 @@ impl MediaTools {
 
 /// Builds a command that never flashes a console window on Windows.
 #[allow(unused_mut)]
-fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut cmd = Command::new(program);
     cmd.env("PATH", crate::system::augmented_path());
     #[cfg(windows)]
@@ -308,7 +308,7 @@ pub const IMAGES_MAX_LIMIT: usize = 50;
 
 /// Every file in `folder` with its metadata, as read by the walk. Symlinks are never followed;
 /// dependency, git and dot folders are skipped; the walk stops 6 levels down and after 5 000 entries.
-fn walk_files(folder: &Path, mut visit: impl FnMut(PathBuf, std::fs::Metadata)) {
+pub(crate) fn walk_files(folder: &Path, mut visit: impl FnMut(PathBuf, std::fs::Metadata)) {
     let mut stack = vec![(folder.to_path_buf(), 0usize)];
     let mut seen = 0usize;
     while let Some((dir, depth)) = stack.pop() {

@@ -2117,6 +2117,69 @@ pub async fn media_extract_frame(
     .map_err(err)?
 }
 
+/// What the Preview panel needs to choose between the live preview and the latest render.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewStatus {
+    /// `hyperframes` / `remotion`, or `None` when the project can't be played live.
+    pub engine: Option<String>,
+    /// A code file changed after the newest render (always true with no render).
+    pub code_newer: bool,
+}
+
+#[tauri::command]
+pub async fn preview_status(state: State<'_, AppState>, project_id: String) -> CmdResult<PreviewStatus> {
+    let folder = project_folder(&state, &project_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let engine = crate::preview::detect_engine(&folder).map(str::to_string);
+        let rendered = media::latest_render(&folder).and_then(|v| std::fs::metadata(v).and_then(|m| m.modified()).ok());
+        let code_newer = engine.is_some() && crate::preview::code_newer_than(&folder, rendered);
+        PreviewStatus { engine, code_newer }
+    })
+    .await
+    .map_err(err)
+}
+
+/// Starts (or reuses) the project's live preview server; returns the harness URL for the panel's iframe.
+#[tauri::command]
+pub async fn preview_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+) -> CmdResult<crate::preview::Started> {
+    let folder = project_folder(&state, &project_id)?;
+    let engine = crate::preview::detect_engine(&folder).ok_or("This project can't be played live")?;
+    let resource_dir = app.path().resource_dir().ok();
+    let script = crate::preview::server_script(resource_dir.as_deref()).ok_or("The live preview is missing from this install")?;
+    // Starting waits for the server's ready line: off the async runtime.
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<crate::preview::PreviewServers>().start(&project_id, &folder, engine, &script)
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+pub fn preview_stop(servers: State<'_, crate::preview::PreviewServers>, project_id: String) {
+    servers.stop(&project_id);
+}
+
+/// Frame `frame` of the live preview, drawn exactly as the render will be, saved where
+/// `media_extract_frame` saves frames.
+#[tauri::command]
+pub async fn preview_still(
+    state: State<'_, AppState>,
+    servers: State<'_, crate::preview::PreviewServers>,
+    project_id: String,
+    frame: u32,
+    fps: f64,
+) -> CmdResult<String> {
+    let folder = project_folder(&state, &project_id)?;
+    let ms = if fps > 0.0 { (frame as f64 / fps * 1000.0).round() as u64 } else { 0 };
+    let out = folder.join(".tayang").join("frames").join(format!("frame-{ms}.png"));
+    servers.still(&project_id, frame, &out).await.map(|p| path_string(&p))
+}
+
 #[tauri::command]
 pub async fn media_thumbnails(
     state: State<'_, AppState>,
