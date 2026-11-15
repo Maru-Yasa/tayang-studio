@@ -1,6 +1,6 @@
 # Live preview without rendering: design
 
-Status: draft, 2026-11-15.
+Status: built on `feat/live-preview`, 2026-11-15. Sections marked **(as built)** changed from the draft.
 
 Lines marked **(my call)** were decided by Claude while designing and are open to change. Everything else was decided by the owner.
 
@@ -71,7 +71,7 @@ In order, first match wins **(my call)**:
 2. The project's style engine.
 3. The files: `remotion` in `package.json` dependencies → Remotion; an `index.html` using HyperFrames (`data-composition` / the HyperFrames runtime) → HyperFrames.
 
-Remotion entry and composition without `tayang.json`: the entry from `remotion.config.*` or the default `src/index.ts(x)`; the composition is the only one registered, or the one the latest `npx remotion render` used (if it can be read from the project), else the first. The prompt in `packages/skills/src/project.ts` asks the agent to write the `preview` block when it sets up a Remotion project, so detection is a fallback.
+Remotion entry and composition without `tayang.json`: the entry from `remotion.config.*` (`setEntryPoint`) or the default `src/index.{ts,tsx,js,jsx}`; the composition is the first one registered. **(as built)** The agent is not asked to write a `preview` block: `render_plan` requires `render` in any `tayang.json`, so a file with only `preview` would break rendering. Instead the Remotion prompt (`packages/skills/src/project.ts`) asks for a local `@remotion/cli`, the entry at `src/index.ts`, and the rendered composition registered first. Rust also reads `hyperframes.json` as a HyperFrames marker; the style's engine is not consulted (the files are enough once the agent has built anything).
 
 ### Behaviour
 
@@ -97,8 +97,17 @@ Remotion entry and composition without `tayang.json`: the entry from `remotion.c
 - One fixture project per engine, and a check that a still captured live equals the same frame from a render (pixel compare with a small tolerance).
 - `Preview.tsx`: existing tests keep passing with the MP4 source; new ones for choosing the source and the label.
 
+## How it was built **(as built)**
+
+- `packages/shared/src/preview.ts`: protocol v1 (`previewEventOf`, `previewCommand`).
+- `packages/preview-server`: `src/server.mjs` (HTTP, token in the path, Host check, `x-tayang-control` for stills, SSE `reload`/`fail`, exits when stdin closes), `src/remotion.mjs`, `src/hyperframes.mjs`, `src/files.mjs`, `src/project.mjs`; `harness/bridge.js` (shared by both engines), `harness/remotion-entry.js`, `harness/hyperframes.html`; `vendor/hyperframes-player.global.js` (0.9.10, Apache-2.0, see `vendor/NOTICE.md`).
+- Remotion: the project's `@remotion/cli` brings `@remotion/bundler` and `@remotion/player` at its own version, so nothing is installed. The harness entry is appended after Remotion's render entry in the same bundle; it reads compositions through `Internals.CompositionManagerProvider` / `compositionsRef` / `resolveVideoConfig` (the same internals Remotion's render entry uses) and mounts `<Player>`. Stills use the project's `@remotion/renderer` (`renderStill`) on that same bundle with one browser kept open. A change rebuilds the bundle (webpack cache) and reloads the page on the same frame.
+- HyperFrames: `<hyperframes-player>` plays the project's `index.html` directly; stills run `npx -y hyperframes@0.9.10 snapshot . --at <t> --no-end`.
+- Rust `preview.rs`: `detect_engine`, `code_newer_than`, `PreviewServers` (start/reuse/stop/stop_all/still); commands `preview_status`, `preview_start`, `preview_stop`, `preview_still`. Resources ship `preview-server/{src,harness,vendor}`.
+- Desktop: `lib/liveSource.ts` and `Preview.tsx`; the panel re-checks `preview_status` every 4 s while it is not live.
+
+Verified on fixtures (headless Chrome, outside the app): both engines report `ready`, seek, play/pause, keep the frame across a file change, and produce exact stills. Not yet verified inside the Tauri webview (iframe from `tauri://` to `http://127.0.0.1`, sound autoplay in WKWebView/WebView2).
+
 ## Left to the builder
 
-- How the Remotion harness gets the composition list from the user's root (Remotion's public API first; if only internal APIs work, pin and note it). This is the riskiest part: start the plan with a spike that plays one Remotion fixture in the harness.
-- Where `hyperframes-player.global.js` is loaded from (the npx cache of the pinned version, or a copy shipped with the server).
 - Frame-message throttling, idle timeout length, and the exact file-watch ignore list.
