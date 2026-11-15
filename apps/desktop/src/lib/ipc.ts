@@ -17,6 +17,7 @@ import type {
   FileInfo,
   Job,
   MediaInfo,
+  PreviewEngine,
   MessagePart,
   ModelChoice,
   NewProject,
@@ -214,6 +215,16 @@ export const mediaProbe = (projectId: string) =>
   invoke<MediaInfo | null>('media_probe', { projectId });
 export const mediaExtractFrame = (projectId: string, timeSec: number) =>
   invoke<string>('media_extract_frame', { projectId, timeSec });
+export interface PreviewStatus {
+  engine: PreviewEngine | null;
+  codeNewer: boolean;
+}
+export const previewStatus = (projectId: string) => invoke<PreviewStatus>('preview_status', { projectId });
+export const previewStart = (projectId: string) =>
+  invoke<{ url: string; engine: PreviewEngine }>('preview_start', { projectId });
+export const previewStop = (projectId: string) => invoke<void>('preview_stop', { projectId });
+export const previewStill = (projectId: string, frame: number, fps: number) =>
+  invoke<string>('preview_still', { projectId, frame, fps });
 export const mediaThumbnails = (projectId: string, count: number) =>
   invoke<string[]>('media_thumbnails', { projectId, count });
 export interface RenderCommand {
