@@ -61,7 +61,7 @@ export function buildProjectBrief(
     template
       ? '- Follow STYLE.md for the toolchain; install and render with the commands in tayang.json.'
       : remotion
-        ? '- Build it with Remotion in this folder (set it up with npm if it is not there yet). For a 3D look add three and @remotion/three and build the world in three.js inside Remotion.'
+        ? '- Build it with Remotion in this folder (set it up with npm if it is not there yet, with @remotion/cli installed locally, and the entry point at src/index.ts). For a 3D look add three and @remotion/three and build the world in three.js inside Remotion. Register the composition you render first in the root: Tayang\'s live preview plays the first one, so the user can watch the video before it is rendered.'
         : '- Use HyperFrames (`npx hyperframes`) to build and render the video.',
     '- Keep all files in this folder. Do not write outside it.',
     `- ${FOREGROUND_RULE}`,
