@@ -160,6 +160,47 @@ describe('Scrubber layers', () => {
   });
 });
 
+describe('Scrubber zoom', () => {
+  const draw = (zoom = 1) => {
+    const onZoom = vi.fn();
+    const onSeek = vi.fn();
+    render(<Scrubber durationSec={34} fps={30} frame={330} thumbnails={thumbs} onSeek={onSeek} zoom={zoom} onZoom={onZoom} />);
+    return { onZoom, onSeek, viewport: screen.getByTestId('scrubber-viewport') };
+  };
+
+  it('draws the timeline zoom times wider, scrolling sideways', () => {
+    const { viewport } = draw(4);
+    expect((viewport.firstElementChild as HTMLElement).style.width).toBe('400%');
+    expect(viewport.className).toMatch(/overflow-x-auto/);
+    cleanup();
+    const fit = draw(1).viewport;
+    expect((fit.firstElementChild as HTMLElement).style.width).toBe('');
+    expect(fit.className).toMatch(/overflow-x-hidden/);
+  });
+
+  it('zooms with + and - on the strip, and 0 shows the whole video', async () => {
+    const { onZoom, onSeek } = draw(4);
+    screen.getByRole('slider').focus();
+    await userEvent.keyboard('=');
+    await userEvent.keyboard('-');
+    await userEvent.keyboard('0');
+    expect(onZoom.mock.calls).toEqual([[8], [2], [1]]);
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it('zooms with Ctrl/⌘ + scroll (a pinch), within the limits; a plain scroll does not zoom', () => {
+    const { onZoom, viewport } = draw(2);
+    fireEvent.wheel(viewport, { deltaY: 10 });
+    expect(onZoom).not.toHaveBeenCalled();
+    const zoomIn = new WheelEvent('wheel', { deltaY: -50, ctrlKey: true, cancelable: true });
+    viewport.dispatchEvent(zoomIn);
+    expect(zoomIn.defaultPrevented).toBe(true);
+    expect(onZoom.mock.calls[0]![0]).toBeCloseTo(2 * Math.exp(0.5));
+    viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: 5000, metaKey: true, cancelable: true }));
+    expect(onZoom.mock.calls[1]![0]).toBe(1);
+  });
+});
+
 describe('Preview layout', () => {
   beforeEach(() => {
     vi.mocked(ipc.mediaLatestRender).mockResolvedValue('/p/out.mp4');

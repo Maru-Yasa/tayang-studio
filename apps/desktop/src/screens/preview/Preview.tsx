@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronRight, Pause, Play, SquarePlus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pause, Play, SquarePlus, ZoomIn, ZoomOut } from 'lucide-react';
 import { hasFramesChecked } from '@tayang/skills';
 import { formatTimecode, frameAt, secAt } from '@tayang/shared';
 import type { MediaInfo } from '@tayang/shared';
@@ -28,7 +28,7 @@ import { useElapsed } from '@/components/Activity';
 import { useChat } from '@/state/chat';
 import { useRender } from '@/state/render';
 import { advanceProject } from '@/lib/projectStatus';
-import { Scrubber, type Scene } from './Scrubber';
+import { Scrubber, ZOOM_MAX, ZOOM_MIN, clampZoom, type Scene } from './Scrubber';
 
 const THUMBS = 12;
 /** How often the panel looks again whether the code can be played live, or changed after the render. */
@@ -131,6 +131,9 @@ export function Preview({
   // Voice and subtitles under the strip; kept as the same object while they don't change.
   const [layers, setLayers] = useState<TimelineLayers | null>(null);
   const layersKey = useRef('');
+  // How far the timeline is zoomed in; each project opens with the whole video in view.
+  const [zoom, setZoom] = useState(ZOOM_MIN);
+  useEffect(() => setZoom(ZOOM_MIN), [projectId]);
 
   // The stage's content size, measured: the frame box is sized from it in px on every platform.
   const [stage, setStage] = useState<{ width: number; height: number } | null>(null);
@@ -457,15 +460,47 @@ export function Preview({
             {current}
             <span className="text-text-3"> / {length}</span>
           </span>
+          <div data-testid="zoom" className="ml-auto flex shrink-0 items-center" title={t('preview.zoomTip')}>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t('preview.zoomOut')}
+              disabled={zoom <= ZOOM_MIN}
+              onClick={() => setZoom((z) => clampZoom(z / 2))}
+              className="size-7 shrink-0 px-0"
+            >
+              <ZoomOut size={14} strokeWidth={1.5} />
+            </Button>
+            <button
+              type="button"
+              aria-label={t('preview.zoomReset')}
+              title={t('preview.zoomReset')}
+              disabled={zoom <= ZOOM_MIN}
+              onClick={() => setZoom(ZOOM_MIN)}
+              className="hidden w-8 cursor-pointer text-center font-mono text-[11px] tabular-nums text-text-3 enabled:hover:text-foreground disabled:cursor-default @min-[360px]:block"
+            >
+              {`${zoom < 10 ? Math.round(zoom * 10) / 10 : Math.round(zoom)}×`}
+            </button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t('preview.zoomIn')}
+              disabled={zoom >= ZOOM_MAX}
+              onClick={() => setZoom((z) => clampZoom(z * 2))}
+              className="size-7 shrink-0 px-0"
+            >
+              <ZoomIn size={14} strokeWidth={1.5} />
+            </Button>
+          </div>
           <span
             title={t('preview.frame', { n: frame })}
-            className="ml-auto hidden h-5 shrink-0 items-center rounded-sm bg-raised px-1.5 font-mono text-[11px] tabular-nums text-text-3 @min-[320px]:inline-flex"
+            className="hidden h-5 shrink-0 items-center rounded-sm bg-raised px-1.5 font-mono text-[11px] tabular-nums text-text-3 @min-[320px]:inline-flex"
           >
             #{frame}
           </span>
         </div>
 
-        <Scrubber durationSec={durationSec} fps={fps} frame={frame} thumbnails={thumbs} onSeek={seek} scenes={scenes} layers={layers} />
+        <Scrubber durationSec={durationSec} fps={fps} frame={frame} thumbnails={thumbs} onSeek={seek} scenes={scenes} layers={layers} zoom={zoom} onZoom={setZoom} />
 
         <div className="flex">
           <Button

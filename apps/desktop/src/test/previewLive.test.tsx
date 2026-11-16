@@ -168,4 +168,24 @@ describe('Preview: live from the code', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Jump to this subtitle: Halo' }));
     expect(post).toHaveBeenLastCalledWith({ tayangPreview: PREVIEW_PROTOCOL, type: 'seek', frame: 30 }, ORIGIN);
   });
+
+  it('zooms the timeline in and out from the controls', async () => {
+    m.mediaLatestRender.mockResolvedValue(null);
+    m.mediaProbe.mockResolvedValue(null);
+    m.previewStatus.mockResolvedValue({ engine: 'hyperframes', codeNewer: true });
+    render(<Preview projectId="p1" chatId="c1" />);
+    await liveFrame();
+    ready();
+    const content = () => screen.getByTestId('scrubber-viewport').firstElementChild as HTMLElement;
+    const zoomOut = screen.getByRole('button', { name: 'Zoom out of the timeline' });
+    expect(zoomOut).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in on the timeline' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in on the timeline' }));
+    expect(content().style.width).toBe('400%');
+    expect(screen.getByRole('button', { name: 'Show the whole video' })).toHaveTextContent('4×');
+    fireEvent.click(zoomOut);
+    expect(content().style.width).toBe('200%');
+    fireEvent.click(screen.getByRole('button', { name: 'Show the whole video' }));
+    expect(content().style.width).toBe('');
+  });
 });
