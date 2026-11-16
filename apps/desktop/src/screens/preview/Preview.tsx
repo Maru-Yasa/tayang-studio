@@ -194,11 +194,24 @@ export function Preview({
     };
   }, [load, reloadKey]);
 
+  // A new render shows itself, even when the user had picked the live preview: they rendered to see it.
+  const firstReload = useRef(true);
+  useEffect(() => {
+    if (firstReload.current) {
+      firstReload.current = false;
+      return;
+    }
+    setPrefer(null);
+  }, [reloadKey]);
+
   // A render of this project (the agent's or Tayang's) is running: say so, and show the new video once it ends.
   const run = useRender((s) => s.runs[projectId]);
   const wasRendering = useRef(!!run);
   useEffect(() => {
-    if (wasRendering.current && !run) load().catch((e) => setError(String(e?.message ?? e)));
+    if (wasRendering.current && !run) {
+      setPrefer(null);
+      load().catch((e) => setError(String(e?.message ?? e)));
+    }
     wasRendering.current = !!run;
   }, [run, load]);
 

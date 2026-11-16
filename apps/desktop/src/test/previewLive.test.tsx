@@ -188,4 +188,20 @@ describe('Preview: live from the code', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show the whole video' }));
     expect(content().style.width).toBe('');
   });
+
+  it('shows the new render when a render ends, even after the user picked live', async () => {
+    m.mediaLatestRender.mockResolvedValue('/p/renders/a.mp4');
+    m.mediaProbe.mockResolvedValue({ durationSec: 10, fps: 30, frames: 300, width: 1080, height: 1920 });
+    m.previewStatus.mockResolvedValue({ engine: 'hyperframes', codeNewer: false });
+    const { container, rerender } = render(<Preview projectId="p1" chatId="c1" />);
+    await waitFor(() => expect(screen.getByTestId('preview-source').tagName).toBe('BUTTON'));
+    fireEvent.click(screen.getByTestId('preview-source'));
+    expect(await screen.findByTestId('live-preview')).toBeInTheDocument();
+
+    m.mediaLatestRender.mockResolvedValue('/p/renders/b.mp4');
+    rerender(<Preview projectId="p1" chatId="c1" reloadKey={1} />);
+    await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
+    expect(container.querySelector('video')!.getAttribute('src')).toBe('/p/renders/b.mp4');
+    expect(screen.getByTestId('preview-source')).toHaveTextContent('Render');
+  });
 });
