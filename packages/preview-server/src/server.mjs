@@ -8,7 +8,7 @@
 // Every URL starts with /<token>/ (the page token: other local pages can't guess it):
 //   /<token>/            the harness page (the Preview panel's iframe)
 //   /<token>/events      server-sent events: `reload` after a change is ready, `fail` with an error
-//   /<token>/__tayang/…  the bridge and the vendored HyperFrames player
+//   /<token>/__tayang/…  the bridge, the HyperFrames sound and the vendored HyperFrames player
 //   /<token>/p/…         HyperFrames: the project's files; Remotion: the bundle's files at /<token>/…
 //   POST /<token>/still?frame=N&out=<png path>  with header x-tayang-control: <control>
 //                        captures frame N exactly as a render would and writes it to `out`
@@ -25,6 +25,7 @@ import { hyperframesEngine } from './hyperframes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.join(HERE, '..', 'harness', 'bridge.js');
+const AUDIO = path.join(HERE, '..', 'harness', 'audio-mirror.js');
 const PLAYER = path.join(HERE, '..', 'vendor', 'hyperframes-player.global.js');
 
 const log = (...a) => console.error('[preview]', ...a);
@@ -129,6 +130,7 @@ export async function startServer({ project, engine: engineName, work }, { makeE
         return html(page ?? WAITING(engine.error));
       }
       if (rest === '__tayang/bridge.js') return sendFile(req, res, BRIDGE);
+      if (rest === '__tayang/audio-mirror.js') return sendFile(req, res, AUDIO);
       if (rest === '__tayang/player.js') return sendFile(req, res, PLAYER);
       if (!engine) {
         res.writeHead(404).end();
