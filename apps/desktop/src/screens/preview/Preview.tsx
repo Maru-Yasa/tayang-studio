@@ -5,10 +5,12 @@ import { hasFramesChecked } from '@tayang/skills';
 import { formatTimecode, frameAt, secAt } from '@tayang/shared';
 import type { MediaInfo } from '@tayang/shared';
 import { Button } from '@/components/Button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Oyen } from '@/components/Oyen';
 import { cn } from '@/lib/utils';
 import {
   assetUrl,
+  latestRenderInfo,
   mediaExtractFrame,
   mediaLatestRender,
   mediaProbe,
@@ -56,32 +58,70 @@ const Kbd = ({ children }: { children: React.ReactNode }) => (
   </kbd>
 );
 
-/** "Live" or "Render" in the frame's corner; switches between them when both exist. */
-function SourceBadge({ live, canSwitch, onSwitch }: { live: boolean; canSwitch: boolean; onSwitch(): void }) {
-  const { t } = useTranslation();
-  const label = live ? t('preview.live') : t('preview.render');
-  const className =
-    'absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-ink/75 px-2 py-0.5 text-[11px] leading-4 whitespace-nowrap text-text-2 backdrop-blur-sm';
-  const dot = <span aria-hidden="true" className={cn('inline-block size-1.5 rounded-full', live ? 'bg-primary' : 'bg-text-3')} />;
-  if (!canSwitch) {
-    return (
-      <span data-testid="preview-source" title={live ? t('preview.liveTip') : undefined} className={cn(className, 'pointer-events-none')}>
-        {dot}
-        {label}
-      </span>
-    );
-  }
+/** When a render was made, short: the time today, else the day. */
+function renderTime(modifiedAt: string, lang: string): string {
+  const d = new Date(modifiedAt);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date().toDateString() === d.toDateString();
+  return today
+    ? d.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(lang, { day: 'numeric', month: 'short' });
+}
+
+/**
+ * Live from the code or the latest render, both always in view above the video: which one plays and
+ * what the other is. Says when the code changed after the render.
+ */
+function SourcePicker({
+  mode,
+  canLive,
+  renderedAt,
+  codeNewer,
+  onPick,
+}: {
+  mode: 'live' | 'render';
+  canLive: boolean;
+  renderedAt: string | null;
+  codeNewer: boolean;
+  onPick(mode: 'live' | 'render'): void;
+}) {
+  const { t, i18n } = useTranslation();
+  const hasRender = renderedAt !== null;
   return (
-    <button
-      type="button"
-      data-testid="preview-source"
-      title={live ? t('preview.liveSwitchTip') : t('preview.renderSwitchTip')}
-      onClick={onSwitch}
-      className={cn(className, 'cursor-pointer hover:text-foreground')}
-    >
-      {dot}
-      {label}
-    </button>
+    <div className="flex shrink-0 flex-col gap-1.5 px-4 pt-4">
+      <Tabs value={mode} onValueChange={(v) => onPick(v as 'live' | 'render')}>
+        <TabsList data-testid="preview-source" aria-label={t('preview.source')} className="h-8 w-full bg-background">
+          <TabsTrigger
+            value="live"
+            disabled={!canLive}
+            title={canLive ? t('preview.liveTip') : t('preview.cantLive')}
+            className="min-w-0 flex-1 gap-1.5 px-2 text-xs"
+          >
+            <span aria-hidden="true" className={cn('inline-block size-1.5 shrink-0 rounded-full', mode === 'live' ? 'bg-primary' : 'bg-text-3')} />
+            <span className="truncate">{t('preview.liveFromCode')}</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="render"
+            disabled={!hasRender}
+            title={hasRender ? t('preview.renderTip') : undefined}
+            className="min-w-0 flex-1 px-2 text-xs"
+          >
+            <span className="truncate">
+              {!hasRender
+                ? t('preview.noRenderYet')
+                : renderTime(renderedAt, i18n.language)
+                  ? t('preview.renderAt', { time: renderTime(renderedAt, i18n.language) })
+                  : t('preview.renderPlain')}
+            </span>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {hasRender && codeNewer && (
+        <span data-testid="code-newer" className="text-[11px] leading-4 text-orange-light">
+          {t('preview.codeNewer')}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -111,6 +151,7 @@ export function Preview({
 }) {
   const { t } = useTranslation();
   const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [renderedAt, setRenderedAt] = useState<string | null>(null);
   const [info, setInfo] = useState<MediaInfo | null>(null);
   const [thumbs, setThumbs] = useState<string[]>([]);
   const [renderFrame, setFrame] = useState(0);
@@ -178,8 +219,13 @@ export function Preview({
   const load = useCallback(async () => {
     void checkLive();
     void loadLayers();
-    const [path, probe] = await Promise.all([mediaLatestRender(projectId), mediaProbe(projectId)]);
+    const [path, probe, file] = await Promise.all([
+      mediaLatestRender(projectId),
+      mediaProbe(projectId),
+      latestRenderInfo(projectId).catch(() => null),
+    ]);
     setVideoPath(path);
+    setRenderedAt(path ? (file?.modifiedAt ?? '') : null);
     setInfo(probe);
     setFrame(0);
     setPlaying(false);
@@ -370,6 +416,15 @@ export function Preview({
           <RenderBanner since={run.startedAt} />
         </div>
       )}
+      {canLive && (
+        <SourcePicker
+          mode={isLive ? 'live' : 'render'}
+          canLive={canLive}
+          renderedAt={hasRender ? renderedAt : null}
+          codeNewer={!!liveStatus?.codeNewer}
+          onPick={setPrefer}
+        />
+      )}
       <div
         ref={stageRef}
         data-testid="preview-stage"
@@ -417,11 +472,6 @@ export function Preview({
               onTimeUpdate={(e) => setFrame(clamp(frameAt(e.currentTarget.currentTime, fps)))}
             />
           )}
-          <SourceBadge
-            live={isLive}
-            canSwitch={canLive && hasRender}
-            onSwitch={() => setPrefer(isLive ? 'render' : 'live')}
-          />
           {checked && (
             <span
               data-testid="frames-checked"

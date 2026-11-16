@@ -1038,7 +1038,8 @@ describe('ChatProject render and jobs', () => {
     expect(statuses().at(-1)).toBe('working');
     // Done only with a finished video made during the turn.
     const made = { path: '/w/p1/renders/v-1.mp4', name: 'v-1.mp4', size: 9, modifiedAt: new Date().toISOString() };
-    vi.mocked(ipc.latestRenderInfo).mockResolvedValueOnce(made).mockResolvedValueOnce(made);
+    // The Preview panel reads it too: the same answer for every reader.
+    vi.mocked(ipc.latestRenderInfo).mockResolvedValue(made);
     vi.mocked(ipc.mediaProbe).mockResolvedValueOnce({ durationSec: 12.5, fps: 30, frames: 375, width: 1080, height: 1920 });
     await emit('c1', { kind: 'done', stopReason: 'end_turn' });
     await waitFor(() => expect(statuses().at(-1)).toBe('done'));

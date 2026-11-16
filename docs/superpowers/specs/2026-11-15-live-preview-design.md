@@ -76,6 +76,7 @@ Remotion entry and composition without `tayang.json`: the entry from `remotion.c
 ### Behaviour
 
 - **Which source plays:** live when the project has code the preview can play and either there is no MP4 or the code changed after the newest MP4; the MP4 otherwise. The label shows which one plays and switches to the other. **(my call)**
+- **The switch (as built, owner's pick):** a two-part control above the video, `● Live (code) | Render · <time>`, both always in view; Render is disabled with "none yet" before the first render, Live disabled for a project that can't play live (the control is hidden then). Under it, "The code changed after the last render" when that is so. A finished render shows itself even after the user picked Live. It replaced a small corner badge whose one label read as an action.
 - **Clock:** playback runs at normal speed and skips frames it cannot draw in time (both players' default); a paused or stepped frame is always drawn exactly. **(my call: the owner did not pick; this keeps playback watchable on heavy scenes)**
 - **Reload:** the HyperFrames harness watches the project folder (ignoring `renders/`, `node_modules/`, `.git/`, hidden folders) and reloads the composition; Remotion's bundler watch does the same. After a reload the harness seeks back to the frame it was on and sends `reloaded`.
 - **Length, fps, size** come from `ready`, not from ffprobe, when live.

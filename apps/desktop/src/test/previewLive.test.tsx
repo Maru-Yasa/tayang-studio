@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { PREVIEW_PROTOCOL } from '@tayang/shared';
 
 vi.mock('@/lib/ipc', () => ({
   assetUrl: (p: string) => p,
+  latestRenderInfo: vi.fn().mockResolvedValue({ path: "/p/renders/a.mp4", name: "a.mp4", size: 1, modifiedAt: "2026-11-16T13:30:00.000Z" }),
   mediaLatestRender: vi.fn(),
   mediaProbe: vi.fn(),
   mediaThumbnails: vi.fn().mockResolvedValue([]),
@@ -63,8 +65,10 @@ describe('Preview: live from the code', () => {
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin');
     expect(m.previewStart).toHaveBeenCalledWith('p1');
     expect(screen.getByText('Starting live preview…')).toBeInTheDocument();
-    expect(screen.getByTestId('preview-source')).toHaveTextContent('Live');
-    expect(screen.getByTestId('preview-source').tagName).toBe('SPAN');
+    // Both sources in view: live plays, there is no render yet.
+    expect(screen.getByRole('tab', { name: 'Live (code)' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Render · none yet' })).toBeDisabled();
+    expect(screen.queryByTestId('code-newer')).toBeNull();
 
     const post = vi.spyOn(iframe.contentWindow!, 'postMessage');
     const attach = vi.spyOn(useChat.getState(), 'attach').mockImplementation(() => {});
@@ -112,27 +116,37 @@ describe('Preview: live from the code', () => {
     m.previewStatus.mockResolvedValue({ engine: 'hyperframes', codeNewer: false });
     const { container } = render(<Preview projectId="p1" chatId="c1" />);
 
-    const badge = await screen.findByTestId('preview-source');
-    await waitFor(() => expect(screen.getByTestId('preview-source').tagName).toBe('BUTTON'));
-    expect(badge).toHaveTextContent('Render');
+    const renderTab = await screen.findByRole('tab', { name: /^Render · \d/ });
+    await waitFor(() => expect(renderTab).toHaveAttribute('aria-selected', 'true'));
     expect(container.querySelector('video')).not.toBeNull();
     expect(m.previewStart).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByTestId('preview-source'));
+    await userEvent.click(screen.getByRole('tab', { name: 'Live (code)' }));
     expect(await screen.findByTestId('live-preview')).toBeInTheDocument();
-    expect(screen.getByTestId('preview-source')).toHaveTextContent('Live');
+    expect(screen.getByRole('tab', { name: 'Live (code)' })).toHaveAttribute('aria-selected', 'true');
 
-    fireEvent.click(screen.getByTestId('preview-source'));
+    await userEvent.click(screen.getByRole('tab', { name: /^Render · / }));
     await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
     expect(m.previewStop).toHaveBeenCalledWith('p1');
   });
 
-  it('plays live when the code changed after the render', async () => {
+  it('plays live when the code changed after the render, and says so', async () => {
     m.mediaLatestRender.mockResolvedValue('/p/renders/a.mp4');
     m.mediaProbe.mockResolvedValue({ durationSec: 10, fps: 30, frames: 300, width: 1080, height: 1920 });
     m.previewStatus.mockResolvedValue({ engine: 'remotion', codeNewer: true });
     render(<Preview projectId="p1" chatId="c1" />);
     expect(await screen.findByTestId('live-preview')).toBeInTheDocument();
+    expect(screen.getByTestId('code-newer')).toHaveTextContent('The code changed after the last render');
+    expect(screen.getByRole('tab', { name: /^Render · / })).toBeEnabled();
+  });
+
+  it('shows no switch for a project that cannot play live', async () => {
+    m.mediaLatestRender.mockResolvedValue('/p/renders/a.mp4');
+    m.mediaProbe.mockResolvedValue({ durationSec: 10, fps: 30, frames: 300, width: 1080, height: 1920 });
+    m.previewStatus.mockResolvedValue({ engine: null, codeNewer: false });
+    const { container } = render(<Preview projectId="p1" chatId="c1" />);
+    await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
+    expect(screen.queryByTestId('preview-source')).toBeNull();
   });
 
   it('keeps the old empty state for a project that cannot play live, and stops the server on unmount', async () => {
@@ -194,14 +208,13 @@ describe('Preview: live from the code', () => {
     m.mediaProbe.mockResolvedValue({ durationSec: 10, fps: 30, frames: 300, width: 1080, height: 1920 });
     m.previewStatus.mockResolvedValue({ engine: 'hyperframes', codeNewer: false });
     const { container, rerender } = render(<Preview projectId="p1" chatId="c1" />);
-    await waitFor(() => expect(screen.getByTestId('preview-source').tagName).toBe('BUTTON'));
-    fireEvent.click(screen.getByTestId('preview-source'));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Live (code)' }));
     expect(await screen.findByTestId('live-preview')).toBeInTheDocument();
 
     m.mediaLatestRender.mockResolvedValue('/p/renders/b.mp4');
     rerender(<Preview projectId="p1" chatId="c1" reloadKey={1} />);
     await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
     expect(container.querySelector('video')!.getAttribute('src')).toBe('/p/renders/b.mp4');
-    expect(screen.getByTestId('preview-source')).toHaveTextContent('Render');
+    expect(screen.getByRole('tab', { name: /^Render · / })).toHaveAttribute('aria-selected', 'true');
   });
 });

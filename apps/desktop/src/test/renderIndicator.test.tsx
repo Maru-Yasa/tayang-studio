@@ -5,6 +5,7 @@ import type { Project } from '@tayang/shared';
 
 vi.mock('@/lib/ipc', () => ({
   assetUrl: (p: string) => p,
+  latestRenderInfo: vi.fn().mockResolvedValue({ path: "/p/renders/a.mp4", name: "a.mp4", size: 1, modifiedAt: "2026-11-16T13:30:00.000Z" }),
   mediaLatestRender: vi.fn().mockResolvedValue(null),
   mediaProbe: vi.fn().mockResolvedValue(null),
   mediaThumbnails: vi.fn().mockResolvedValue([]),

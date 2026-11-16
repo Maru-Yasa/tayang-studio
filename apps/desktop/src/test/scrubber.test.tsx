@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 
 vi.mock('@/lib/ipc', () => ({
+  latestRenderInfo: vi.fn().mockResolvedValue({ path: "/p/renders/a.mp4", name: "a.mp4", size: 1, modifiedAt: "2026-11-16T13:30:00.000Z" }),
   mediaLatestRender: vi.fn(),
   mediaProbe: vi.fn(),
   mediaExtractFrame: vi.fn(),
