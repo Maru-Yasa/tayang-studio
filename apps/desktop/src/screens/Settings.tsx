@@ -546,6 +546,17 @@ export function Settings() {
                   onChange={() => {}}
                 />
               </Row>
+              <Row label={t('settings.encoding')} hint={t('settings.encodingHint')}>
+                <Segmented
+                  label={t('settings.encoding')}
+                  value={settings.renderAcceleration ?? 'gpu'}
+                  options={[
+                    { value: 'gpu', label: t('settings.encodingGpu') },
+                    { value: 'cpu', label: t('settings.encodingCpu') },
+                  ]}
+                  onChange={(renderAcceleration) => void save({ renderAcceleration })}
+                />
+              </Row>
             </Card>
           </section>
         )}
