@@ -40,12 +40,20 @@ function styleSection(style: Style): string {
   ].join('\n');
 }
 
+/** The GPU encoding flags Tayang adds to renders (see `media::accelerate` in the desktop app). */
+export const HYPERFRAMES_GPU_FLAG = '--gpu';
+export const REMOTION_GPU_FLAG = '--hardware-acceleration=if-possible';
+
 /** The project's AGENTS.md. The quality loop is only included when `settings.frameCheck` is on. */
 export function buildProjectBrief(
   p: Project,
   style: Style | null,
-  settings: Pick<Settings, 'fps' | 'frameCheck'>,
+  settings: Pick<Settings, 'fps' | 'frameCheck' | 'renderAcceleration'>,
 ): string {
+  // GPU encoding unless the user picked the CPU; both tools fall back to the CPU without a GPU encoder.
+  const gpu = settings.renderAcceleration !== 'cpu';
+  const hfFlag = gpu ? ` ${HYPERFRAMES_GPU_FLAG}` : '';
+  const rmFlag = gpu ? ` ${REMOTION_GPU_FLAG}` : '';
   const template = !!style?.template;
   // A copied style decides its own engine; only a template's own toolchain overrides it.
   const remotion = !template && style?.engine === 'remotion';
@@ -70,13 +78,18 @@ export function buildProjectBrief(
     `- ${POST_RULE}`,
     `- ${AI_ASSETS_RULE}`,
     ...(template
-      ? ['- When a version is ready, render it with the command in tayang.json so Tayang can show it.']
+      ? [
+          '- When a version is ready, render it with the command in tayang.json so Tayang can show it.' +
+            (gpu
+              ? ` When that command is a HyperFrames render add \`${HYPERFRAMES_GPU_FLAG}\`, and when it is a Remotion render add \`${REMOTION_GPU_FLAG}\`: the user picked GPU encoding.`
+              : ` Encode on the CPU: leave out \`${HYPERFRAMES_GPU_FLAG}\` and \`--hardware-acceleration\`, the user picked it.`),
+        ]
       : remotion
         ? [
-            `- When a version is ready, render it with \`npx remotion render <entry> <composition> renders/${p.slug || slugify(p.title)}-<n>.mp4\` so Tayang can show it.`,
+            `- When a version is ready, render it with \`npx remotion render <entry> <composition> renders/${p.slug || slugify(p.title)}-<n>.mp4${rmFlag}\` so Tayang can show it.`,
           ]
         : [
-            `- When a version is ready, render it with \`npx -y hyperframes@0.9.10 render --output renders/${p.slug || slugify(p.title)}-<n>.mp4\` so Tayang can show it.`,
+            `- When a version is ready, render it with \`npx -y hyperframes@0.9.10 render --output renders/${p.slug || slugify(p.title)}-<n>.mp4${hfFlag}\` so Tayang can show it.`,
           ]),
     '',
     '## Style',
