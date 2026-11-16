@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatTimecode } from '@tayang/shared';
 import { cn } from '@/lib/utils';
+import type { TimelineLayers, VoiceTrack } from '@/lib/ipc';
 
 export interface Scene {
   name: string;
@@ -18,11 +19,46 @@ export interface ScrubberProps {
   thumbnails: string[];
   onSeek(frame: number): void;
   scenes?: Scene[];
+  /** Voice and subtitle rows under the strip, on the same time axis. */
+  layers?: TimelineLayers | null;
 }
 
 const HATCH = 'repeating-linear-gradient(135deg, #1A1A1A 0 6px, #202020 6px 12px)';
 
-export function Scrubber({ durationSec, fps, frame, thumbnails, onSeek, scenes }: ScrubberProps) {
+/** The waveform as one closed shape, mirrored around the middle, in a `peaks.length` × 2 box. */
+export function waveformPath(peaks: number[]): string {
+  if (peaks.length === 0) return '';
+  const y = (p: number) => Math.min(1, Math.max(0.04, p));
+  const top = peaks.map((p, i) => `L${i + 0.5} ${(1 - y(p)).toFixed(3)}`).join('');
+  const bottom = peaks.map((p, i) => `L${i + 0.5} ${(1 + y(p)).toFixed(3)}`).reverse().join('');
+  return `M0 1${top}L${peaks.length} 1${bottom}Z`;
+}
+
+/** Where a span of time sits on the strip, in % of its width; null when it doesn't show. */
+function spanPct(startSec: number, endSec: number, durationSec: number) {
+  const left = (startSec / durationSec) * 100;
+  const width = Math.min(100 - left, ((endSec - startSec) / durationSec) * 100);
+  return left < 100 && width > 0 ? { left: `${left}%`, width: `${width}%` } : null;
+}
+
+function Waveform({ track, durationSec }: { track: VoiceTrack; durationSec: number }) {
+  const at = spanPct(track.startSec, track.startSec + track.durationSec, durationSec);
+  if (!at) return null;
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox={`0 0 ${Math.max(1, track.peaks.length)} 2`}
+      // i18n-ignore: SVG token, not copy
+      preserveAspectRatio="none"
+      className="absolute inset-y-0 h-full text-text-3"
+      style={at}
+    >
+      <path d={waveformPath(track.peaks)} fill="currentColor" />
+    </svg>
+  );
+}
+
+export function Scrubber({ durationSec, fps, frame, thumbnails, onSeek, scenes, layers }: ScrubberProps) {
   const { t } = useTranslation();
   const total = Math.max(1, Math.round(durationSec * fps));
   const last = total - 1;
@@ -43,6 +79,12 @@ export function Scrubber({ durationSec, fps, frame, thumbnails, onSeek, scenes }
   const shownTime = formatTimecode(shown / fps, fps);
   const pct = pctOf(frame);
   const bubblePct = pctOf(shown);
+  const voice = layers?.voice ?? [];
+  const captions = layers?.captions ?? [];
+  const captionAt = (sec: number) => captions.find((c) => sec >= c.startSec && sec < c.endSec);
+  const nowCaption = captionAt(frame / fps);
+  const shownCaption = captionAt(shown / fps);
+  const voiceLabel = layers?.voiceSource === 'render' ? t('preview.voiceFromRender') : t('preview.voiceLayer');
 
   const frameFromX = (clientX: number): number | null => {
     const r = ref.current!.getBoundingClientRect();
@@ -76,17 +118,11 @@ export function Scrubber({ durationSec, fps, frame, thumbnails, onSeek, scenes }
         style={{ left: `${bubblePct}%`, transform: `translateX(-${bubblePct}%)` }}
       >
         {shownScene ? `${shownTime} · ${shownScene.name}` : shownTime}
+        {shownCaption && <span className="inline-block max-w-40 truncate align-bottom text-text-3"> · {shownCaption.text}</span>}
       </div>
+      {/* The strip and its layers share one time axis: press or drag anywhere on them to scrub. */}
       <div
-        ref={ref}
-        role="slider"
-        tabIndex={0}
-        aria-label={t('preview.framesAria')}
-        aria-valuemin={0}
-        aria-valuemax={last}
-        aria-valuenow={frame}
-        aria-valuetext={time}
-        onKeyDown={onKeyDown}
+        data-testid="scrubber-tracks"
         onPointerDown={(e) => {
           dragging.current = true;
           setHover(null);
@@ -100,36 +136,94 @@ export function Scrubber({ durationSec, fps, frame, thumbnails, onSeek, scenes }
         onPointerLeave={() => setHover(null)}
         onPointerUp={() => (dragging.current = false)}
         onPointerCancel={() => (dragging.current = false)}
-        className="relative flex h-12 cursor-pointer touch-none gap-0.5 overflow-hidden rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="relative flex cursor-pointer touch-none flex-col gap-1"
       >
-        {thumbnails.map((src, i) => {
-          const sec = ((i + 0.5) / thumbnails.length) * durationSec;
-          const built = sceneAt(sec)?.built !== false;
-          return (
-            <div
-              key={src + i}
-              className="min-w-0 flex-1 bg-cover bg-center"
-              style={built ? { backgroundImage: `url("${src}")` } : { backgroundImage: HATCH }}
-            />
-          );
-        })}
-      </div>
-      {hover !== null && (
+        <div
+          ref={ref}
+          role="slider"
+          tabIndex={0}
+          aria-label={t('preview.framesAria')}
+          aria-valuemin={0}
+          aria-valuemax={last}
+          aria-valuenow={frame}
+          aria-valuetext={time}
+          onKeyDown={onKeyDown}
+          className="relative flex h-12 shrink-0 gap-0.5 overflow-hidden rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {thumbnails.map((src, i) => {
+            const sec = ((i + 0.5) / thumbnails.length) * durationSec;
+            const built = sceneAt(sec)?.built !== false;
+            return (
+              <div
+                key={src + i}
+                className="min-w-0 flex-1 bg-cover bg-center"
+                style={built ? { backgroundImage: `url("${src}")` } : { backgroundImage: HATCH }}
+              />
+            );
+          })}
+        </div>
+        {voice.length > 0 && (
+          <div
+            data-testid="layer-voice"
+            role="img"
+            aria-label={voiceLabel}
+            title={voiceLabel}
+            className="relative h-6 shrink-0 overflow-hidden rounded-md bg-raised"
+          >
+            {voice.map((v, i) => (
+              <Waveform key={`${v.startSec}-${i}`} track={v} durationSec={durationSec} />
+            ))}
+          </div>
+        )}
+        {captions.length > 0 && (
+          <div
+            data-testid="layer-captions"
+            role="group"
+            aria-label={t('preview.captionsLayer')}
+            className="relative h-5 shrink-0 overflow-hidden rounded-md bg-raised"
+          >
+            {captions.map((c, i) => {
+              const at = spanPct(c.startSec, c.endSec, durationSec);
+              if (!at) return null;
+              return (
+                <button
+                  key={`${c.startSec}-${i}`}
+                  type="button"
+                  title={`${formatTimecode(c.startSec, fps)} · ${c.text}`}
+                  aria-label={`${t('preview.captionJump')}: ${c.text}`}
+                  aria-current={c === nowCaption || undefined}
+                  // A subtitle jumps to its start instead of scrubbing to the pointer.
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => onSeek(clamp(Math.round(c.startSec * fps)))}
+                  className={cn(
+                    'absolute inset-y-0.5 cursor-pointer overflow-hidden rounded-sm border-l px-0.5 text-left text-[10px] leading-4 whitespace-nowrap',
+                    c === nowCaption ? 'border-foreground bg-foreground/15 text-foreground' : 'border-hairline text-text-3 hover:text-text-2',
+                  )}
+                  style={at}
+                >
+                  {c.text}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {hover !== null && (
+          <div
+            aria-hidden="true"
+            data-testid="scrubber-hover"
+            className="pointer-events-none absolute inset-y-0 w-px -translate-x-1/2 bg-foreground/40"
+            style={{ left: `${bubblePct}%` }}
+          />
+        )}
         <div
           aria-hidden="true"
-          data-testid="scrubber-hover"
-          className="pointer-events-none absolute top-7 h-12 w-px -translate-x-1/2 bg-foreground/40"
-          style={{ left: `${bubblePct}%` }}
-        />
-      )}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute top-7 h-12 w-0.5 -translate-x-1/2 bg-foreground"
-        style={{ left: `${pct}%` }}
-      >
-        <div className="absolute -left-1.5 -top-1 flex h-4 w-3.5 items-center justify-center gap-0.5 rounded-sm bg-foreground">
-          <span className="h-2 w-px bg-text-3" />
-          <span className="h-2 w-px bg-text-3" />
+          className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-foreground"
+          style={{ left: `${pct}%` }}
+        >
+          <div className="absolute -left-1.5 -top-1 flex h-4 w-3.5 items-center justify-center gap-0.5 rounded-sm bg-foreground">
+            <span className="h-2 w-px bg-text-3" />
+            <span className="h-2 w-px bg-text-3" />
+          </div>
         </div>
       </div>
       {scenes && scenes.length > 0 && (

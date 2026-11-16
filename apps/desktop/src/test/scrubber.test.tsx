@@ -13,7 +13,7 @@ vi.mock('@/lib/ipc', () => ({
 
 import * as ipc from '@/lib/ipc';
 import { Preview, frameBox } from '@/screens/preview/Preview';
-import { Scrubber } from '@/screens/preview/Scrubber';
+import { Scrubber, waveformPath } from '@/screens/preview/Scrubber';
 import { MessageList } from '@/components/MessageList';
 import { setUiLanguage } from '@/i18n';
 import { useChat } from '@/state/chat';
@@ -93,6 +93,70 @@ describe('Scrubber', () => {
     fireEvent.pointerLeave(slider, { pointerId: 1 });
     expect(screen.getByTestId('scrubber-bubble')).toHaveTextContent('0:11.00 · Chart');
     expect(screen.queryByTestId('scrubber-hover')).toBeNull();
+  });
+});
+
+describe('Scrubber layers', () => {
+  const layers = {
+    voice: [{ startSec: 17, durationSec: 17, peaks: [0.2, 1, 0.5] }],
+    captions: [
+      { startSec: 10, endSec: 12, text: 'Tahun 1667' },
+      { startSec: 12, endSec: 13.6, text: 'Belanda membuat' },
+    ],
+    voiceSource: 'hyperframes' as const,
+  };
+  const draw = (frame = 330, l: typeof layers | null = layers) => {
+    const onSeek = vi.fn();
+    render(<Scrubber durationSec={34} fps={30} frame={frame} thumbnails={thumbs} onSeek={onSeek} layers={l} />);
+    return onSeek;
+  };
+
+  it('draws the voice where it sits on the film', () => {
+    draw();
+    const row = screen.getByRole('img', { name: 'Voice' });
+    const svg = row.querySelector('svg')!;
+    expect(svg.style.left).toBe('50%');
+    expect(svg.style.width).toBe('50%');
+    expect(svg.getAttribute('viewBox')).toBe('0 0 3 2');
+  });
+
+  it('says when the voice is the render sound', () => {
+    draw(330, { ...layers, voiceSource: 'render' as never });
+    expect(screen.getByRole('img', { name: "Voice: the render's sound" })).toBeInTheDocument();
+  });
+
+  it('shows each subtitle in its time, marks the one playing, and jumps to its start on click', () => {
+    const onSeek = draw(330); // 11 s: inside the first subtitle
+    const first = screen.getByRole('button', { name: 'Jump to this subtitle: Tahun 1667' });
+    const second = screen.getByRole('button', { name: 'Jump to this subtitle: Belanda membuat' });
+    expect(first.style.left).toBe(`${(10 / 34) * 100}%`);
+    expect(first).toHaveAttribute('aria-current', 'true');
+    expect(second).not.toHaveAttribute('aria-current');
+    fireEvent.pointerDown(second, { clientX: 999, pointerId: 1 });
+    fireEvent.click(second);
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(360);
+    expect(screen.getByTestId('scrubber-bubble')).toHaveTextContent('0:11.00 · Tahun 1667');
+  });
+
+  it('scrubs from the layer rows too', () => {
+    const onSeek = draw();
+    const slider = screen.getByRole('slider');
+    slider.getBoundingClientRect = () =>
+      ({ left: 0, width: 1000, top: 0, height: 48, right: 1000, bottom: 48, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    fireEvent.pointerDown(screen.getByTestId('layer-voice'), { clientX: 250, pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledWith(255);
+  });
+
+  it('shows no rows without layers', () => {
+    draw(330, null);
+    expect(screen.queryByTestId('layer-voice')).toBeNull();
+    expect(screen.queryByTestId('layer-captions')).toBeNull();
+  });
+
+  it('makes the waveform one closed mirrored shape', () => {
+    expect(waveformPath([])).toBe('');
+    expect(waveformPath([1, 0])).toBe('M0 1L0.5 0.000L1.5 0.960L2 1L1.5 1.040L0.5 2.000Z');
   });
 });
 

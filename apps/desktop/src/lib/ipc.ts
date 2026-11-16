@@ -225,6 +225,23 @@ export const previewStart = (projectId: string) =>
 export const previewStop = (projectId: string) => invoke<void>('preview_stop', { projectId });
 export const previewStill = (projectId: string, frame: number, fps: number) =>
   invoke<string>('preview_still', { projectId, frame, fps });
+/** A voice clip under the film strip: where it sits and its waveform (0..1). */
+export interface VoiceTrack {
+  startSec: number;
+  durationSec: number;
+  peaks: number[];
+}
+export interface Caption {
+  startSec: number;
+  endSec: number;
+  text: string;
+}
+export interface TimelineLayers {
+  voice: VoiceTrack[];
+  captions: Caption[];
+  voiceSource: 'layers' | 'hyperframes' | 'render' | null;
+}
+export const previewLayers = (projectId: string) => invoke<TimelineLayers>('preview_layers', { projectId });
 export const mediaThumbnails = (projectId: string, count: number) =>
   invoke<string[]>('media_thumbnails', { projectId, count });
 export interface RenderCommand {
