@@ -1220,6 +1220,7 @@ export const id: Translations = {
     keySave: 'Cek dan pakai',
     keyRemove: 'Hapus key',
     connected: 'Tersambung. Voiceover memakai akun {{name}}-mu',
+    geminiNote: 'Buat key gratis di Google AI Studio. Voiceover ditagih ke proyek Google-mu dan tetap jalan walau kamu keluar dari akun Tayang.',
     fishFree: 'Tersambung. Saldo API-mu kosong, jadi voiceover memakai model gratis Fish Audio',
     notYet: 'Belum aktif. Voiceover masih memakai {{name}} sampai API key-nya disimpan',
     pending: 'Belum aktif',

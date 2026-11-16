@@ -420,8 +420,8 @@ pub struct Job {
     pub archived_at: Option<String>,
 }
 
-/// Where voice-overs come from: Tayang credits, the user's own ElevenLabs or Fish Audio key, or
-/// VoiceStudio on this computer (see `voice`).
+/// Where voice-overs come from: Tayang credits, the user's own ElevenLabs, Fish Audio or Gemini
+/// key, or VoiceStudio on this computer (see `voice`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum VoiceSource {
@@ -430,6 +430,7 @@ pub enum VoiceSource {
     Elevenlabs,
     Fishaudio,
     Voicestudio,
+    Gemini,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

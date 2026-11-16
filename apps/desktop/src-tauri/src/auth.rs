@@ -959,6 +959,8 @@ pub(crate) mod tests {
         pub method: String,
         pub path: String,
         pub auth: Option<String>,
+        /// Google's `x-goog-api-key` header.
+        pub goog_key: Option<String>,
         pub body: String,
     }
 
@@ -1014,7 +1016,10 @@ pub(crate) mod tests {
                     let auth = head
                         .lines()
                         .find_map(|l| l.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case("authorization")).map(|(_, v)| v.trim().to_string()));
-                    let req = Req { method, path, auth, body };
+                    let goog_key = head
+                        .lines()
+                        .find_map(|l| l.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case("x-goog-api-key")).map(|(_, v)| v.trim().to_string()));
+                    let req = Req { method, path, auth, goog_key, body };
                     let nth = {
                         let mut h = hits.lock().unwrap();
                         let nth = h.iter().filter(|r| r.path == req.path).count();
