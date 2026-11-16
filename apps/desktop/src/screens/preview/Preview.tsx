@@ -540,7 +540,7 @@ export function Preview({
               title={t('preview.zoomReset')}
               disabled={zoom <= ZOOM_MIN}
               onClick={() => setZoom(ZOOM_MIN)}
-              className="hidden w-8 cursor-pointer text-center font-mono text-[11px] tabular-nums text-text-3 enabled:hover:text-foreground disabled:cursor-default @min-[360px]:block"
+              className="hidden w-8 cursor-pointer text-center font-mono text-[11px] tabular-nums text-text-3 enabled:hover:text-foreground disabled:cursor-default @min-[460px]:block"
             >
               {`${zoom < 10 ? Math.round(zoom * 10) / 10 : Math.round(zoom)}×`}
             </button>
