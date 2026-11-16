@@ -333,8 +333,16 @@ export function MessageList({
   useEffect(() => {
     const box = scrollRef?.current;
     if (!box) return;
+    // Any move up away from the end stops following, even one wheel notch that stays within 80px:
+    // otherwise the next streamed chunk pulls the reader straight back down. Following only ever
+    // scrolls down, and content growing or shrinking leaves the reader at the end, so a move up
+    // with the end out of reach is the reader's own.
+    let lastTop = box.scrollTop;
     const onScroll = () => {
-      stick.current = box.scrollHeight - box.scrollTop - box.clientHeight <= 80;
+      const top = box.scrollTop;
+      const gap = box.scrollHeight - top - box.clientHeight;
+      stick.current = gap <= 80 && !(top < lastTop - 1 && gap > 2);
+      lastTop = top;
     };
     // The scroll-to-bottom pill asks to follow the conversation again.
     const onStick = () => {

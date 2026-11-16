@@ -186,6 +186,41 @@ describe('fix round', () => {
     spy.mockRestore();
   });
 
+  it('a small scroll up while the agent writes stops following (issue #27)', () => {
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    function Box({ n }: { n: number }) {
+      const ref = useRef<HTMLDivElement>(null);
+      return (
+        <div
+          data-testid="box"
+          ref={(el) => {
+            ref.current = el;
+            if (el) {
+              Object.defineProperty(el, 'clientHeight', { configurable: true, value: 500 });
+              Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 2000 });
+            }
+          }}
+        >
+          <MessageList streaming messages={Array.from({ length: n }, (_, i) => agent([text(`m${i}`)]))} scrollRef={ref} />
+        </div>
+      );
+    }
+    const view = render(<Box n={1} />);
+    const box = screen.getByTestId('box');
+    box.scrollTop = 1500;
+    fireEvent.scroll(box);
+    box.scrollTop = 1460; // one wheel notch up: still within 80px of the end
+    fireEvent.scroll(box);
+    spy.mockClear();
+    view.rerender(<Box n={2} />);
+    expect(spy).not.toHaveBeenCalled();
+    box.scrollTop = 1490; // back down near the end: follow again
+    fireEvent.scroll(box);
+    view.rerender(<Box n={3} />);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   describe('opening a chat lands on the latest message', () => {
     const msgs = (chatId: string, n: number): ChatMessage[] =>
       Array.from({ length: n }, (_, i) => ({ ...agent([text(`${chatId}-${i}`)]), id: `${chatId}-${i}`, chatId }));
