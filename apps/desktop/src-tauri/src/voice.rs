@@ -1,5 +1,5 @@
-//! The user's own voice for voice-overs, instead of Tayang credits: an ElevenLabs or Fish Audio
-//! API key, or VoiceStudio running on this computer (free, local). The agents still call Tayang's `/voice`
+//! The user's own voice for voice-overs, instead of Tayang credits: an ElevenLabs, Fish Audio or
+//! Gemini (Google AI Studio) API key, or VoiceStudio running on this computer (free, local). The agents still call Tayang's `/voice`
 //! (see `ai_proxy`); Tayang sends the text to the source picked in Settings › Video, so every
 //! agent works the same way and the key never reaches an agent.
 
@@ -17,6 +17,12 @@ const ELEVEN_MODEL: &str = "eleven_multilingual_v2";
 /// "George", a voice every ElevenLabs account has.
 const ELEVEN_VOICE: &str = "JBFqnCBsd6RMkjVDRZzb";
 pub const FISH_BASE: &str = "https://api.fish.audio";
+/// Google's Gemini API; the key is from Google AI Studio and billed to the user's Google project.
+pub const GEMINI_BASE: &str = "https://generativelanguage.googleapis.com";
+/// Gemini's speech model: over 130 languages, Indonesian included.
+const GEMINI_MODEL: &str = "gemini-3.8-flash-tts";
+/// One of Gemini's prebuilt voices: a clear, firm narrator.
+const GEMINI_VOICE: &str = "Kore";
 /// VoiceStudio's local API, up while the app is open.
 pub const VOICESTUDIO_BASE: &str = "http://127.0.0.1:3900";
 impl VoiceSource {
@@ -27,6 +33,7 @@ impl VoiceSource {
             Self::Elevenlabs => "ElevenLabs",
             Self::Fishaudio => "Fish Audio",
             Self::Voicestudio => "VoiceStudio",
+            Self::Gemini => "Gemini",
         }
     }
 
@@ -35,6 +42,7 @@ impl VoiceSource {
         match self {
             Self::Elevenlabs => Some("elevenlabs-api-key"),
             Self::Fishaudio => Some("fish-audio-api-key"),
+            Self::Gemini => Some("gemini-api-key"),
             Self::Tayang | Self::Voicestudio => None,
         }
     }
@@ -45,6 +53,7 @@ impl VoiceSource {
             Self::Elevenlabs => ELEVEN_BASE,
             Self::Fishaudio => FISH_BASE,
             Self::Voicestudio => VOICESTUDIO_BASE,
+            Self::Gemini => GEMINI_BASE,
             Self::Tayang => "",
         }
     }
@@ -190,6 +199,117 @@ pub async fn eleven_speak(client: &reqwest::Client, base: &str, key: &str, text:
     }
 }
 
+/// Google says why in `error.status` (`RESOURCE_EXHAUSTED` is both a rate limit and a spent quota)
+/// and `error.details[].reason` (`API_KEY_INVALID` comes back as a 400).
+async fn gemini_error(res: reqwest::Response) -> VoiceError {
+    let status = res.status().as_u16();
+    let body = res.bytes().await.ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
+    let text = body.to_string().to_lowercase();
+    if text.contains("api_key_invalid") || text.contains("api key not valid") || text.contains("permission_denied") {
+        return VoiceError::BadKey;
+    }
+    match status {
+        401 | 403 => VoiceError::BadKey,
+        402 => VoiceError::NoBalance,
+        429 if text.contains("quota") && !text.contains("per minute") => VoiceError::NoBalance,
+        429 | 503 => VoiceError::Busy,
+        _ => VoiceError::Failed,
+    }
+}
+
+/// The last `{ "type": "audio", "data": <base64> }` anywhere in an Interactions answer
+/// (`steps[].content[]`), decoded.
+fn gemini_audio(v: &Value) -> Option<Vec<u8>> {
+    fn walk<'a>(v: &'a Value, found: &mut Option<&'a str>) {
+        match v {
+            Value::Object(m) => {
+                if m.get("type").and_then(Value::as_str) == Some("audio") {
+                    if let Some(d) = m.get("data").and_then(Value::as_str) {
+                        *found = Some(d);
+                    }
+                }
+                m.values().for_each(|x| walk(x, found));
+            }
+            Value::Array(a) => a.iter().for_each(|x| walk(x, found)),
+            _ => {}
+        }
+    }
+    let mut found = None;
+    walk(v, &mut found);
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.decode(found?).ok().filter(|b| !b.is_empty() && b.len() <= MAX_BYTES)
+}
+
+/// Speech from Gemini as WAV (24 kHz mono), in one prebuilt voice. Gemini reads the language from
+/// the text.
+pub async fn gemini_speak(client: &reqwest::Client, base: &str, key: &str, text: &str) -> Result<Vec<u8>, VoiceError> {
+    if key.is_empty() {
+        return Err(VoiceError::NoKey);
+    }
+    let body = json!({
+        "model": GEMINI_MODEL,
+        "input": [{ "type": "user_input", "content": [{ "type": "text", "text": text }] }],
+        "response_format": { "type": "audio", "mime_type": "audio/wav" },
+        "generation_config": { "speech_config": [{ "voice": GEMINI_VOICE }] },
+    });
+    let res = client
+        .post(format!("{base}/v1beta/interactions"))
+        .header("x-goog-api-key", key)
+        .header("content-type", "application/json")
+        .timeout(Duration::from_secs(180))
+        .body(body.to_string())
+        .send()
+        .await
+        .map_err(|_| VoiceError::Failed)?;
+    if !res.status().is_success() {
+        return Err(gemini_error(res).await);
+    }
+    let bytes = res.bytes().await.map_err(|_| VoiceError::Failed)?;
+    let answer: Value = serde_json::from_slice(&bytes).map_err(|_| VoiceError::Failed)?;
+    let wav = gemini_audio(&answer).ok_or(VoiceError::Failed)?;
+    // A RIFF header is what keeps it saved as .wav; Google promises one for this format.
+    if is_wav(&wav) { Ok(wav) } else { Ok(pcm_to_wav(&wav)) }
+}
+
+/// Wraps raw 24 kHz mono 16-bit PCM (`audio/l16`) in a WAV header.
+fn pcm_to_wav(pcm: &[u8]) -> Vec<u8> {
+    let (rate, channels, bits) = (24_000u32, 1u16, 16u16);
+    let block = channels * bits / 8;
+    let mut w = Vec::with_capacity(44 + pcm.len());
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes());
+    w.extend_from_slice(&channels.to_le_bytes());
+    w.extend_from_slice(&rate.to_le_bytes());
+    w.extend_from_slice(&(rate * block as u32).to_le_bytes());
+    w.extend_from_slice(&block.to_le_bytes());
+    w.extend_from_slice(&bits.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    w.extend_from_slice(pcm);
+    w
+}
+
+/// Whether Google takes this key for the speech model.
+pub async fn gemini_check(client: &reqwest::Client, base: &str, key: &str) -> VoiceCheck {
+    if key.is_empty() {
+        return VoiceCheck::failed(VoiceError::NoKey);
+    }
+    let res = client
+        .get(format!("{base}/v1beta/models/{GEMINI_MODEL}"))
+        .header("x-goog-api-key", key)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await;
+    match res {
+        Ok(res) if res.status().is_success() => VoiceCheck { ok: true, error: None, has_credit: None },
+        Ok(res) => VoiceCheck::failed(gemini_error(res).await),
+        Err(_) => VoiceCheck::failed(VoiceError::Failed),
+    }
+}
+
 /// Speech from VoiceStudio on this computer: its OpenAI-style `/v1/audio/speech`.
 pub async fn voicestudio_speak(client: &reqwest::Client, base: &str, text: &str, language: Option<&str>) -> Result<Vec<u8>, VoiceError> {
     if text.chars().count() > VOICESTUDIO_MAX_CHARS {
@@ -233,6 +353,7 @@ pub async fn speak(client: &reqwest::Client, setup: &VoiceSetup, text: &str, lan
         VoiceSource::Elevenlabs => eleven_speak(client, &setup.base, key, text).await,
         VoiceSource::Fishaudio => fish_speak(client, &setup.base, key, text, language).await,
         VoiceSource::Voicestudio => voicestudio_speak(client, &setup.base, text, language).await,
+        VoiceSource::Gemini => gemini_speak(client, &setup.base, key, text).await,
         VoiceSource::Tayang => Err(VoiceError::Failed),
     }
     .map_err(|e| e.refusal(name))?;
@@ -346,6 +467,7 @@ pub async fn key_check(client: &reqwest::Client, source: VoiceSource, base: &str
     match source {
         VoiceSource::Elevenlabs => eleven_check(client, base, key).await,
         VoiceSource::Fishaudio => fish_check(client, base, key).await,
+        VoiceSource::Gemini => gemini_check(client, base, key).await,
         VoiceSource::Tayang | VoiceSource::Voicestudio => VoiceCheck::failed(VoiceError::Failed),
     }
 }
@@ -414,6 +536,66 @@ mod tests {
         assert_eq!((status, body["error"].as_str()), (401, Some("bad-key")));
         let message = body["message"].as_str().unwrap();
         assert!(message.contains("Fish Audio API key was refused") && message.contains("Settings › Video"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn gemini_speaks_with_the_users_key_and_keeps_the_wav() {
+        use base64::Engine as _;
+        let wav = b"RIFF\x24\x00\x00\x00WAVEfmt-pcm".to_vec();
+        let data = base64::engine::general_purpose::STANDARD.encode(&wav);
+        let answer = json!({ "steps": [
+            { "type": "user_input" },
+            { "type": "model_output", "content": [{ "type": "audio", "mime_type": "audio/wav", "data": data }] },
+        ] });
+        let f = fake(move |_, _| (200, answer.to_string())).await;
+        let dir = tempfile::tempdir().unwrap();
+        let s = VoiceSetup { source: VoiceSource::Gemini, key: Some("AIza-1".into()), base: f.base.clone() };
+        let got = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
+        assert_eq!(got["files"], json!(["audio/intro.wav"]));
+        assert_eq!(std::fs::read(dir.path().join("audio/intro.wav")).unwrap(), wav);
+        let hits = f.hits("/api/v1beta/interactions");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].goog_key.as_deref(), Some("AIza-1"));
+        let sent: Value = serde_json::from_str(&hits[0].body).unwrap();
+        assert_eq!(sent["model"], "gemini-3.8-flash-tts");
+        assert_eq!(sent["input"][0]["content"][0]["text"], "Halo dunia");
+        assert_eq!(sent["generation_config"]["speech_config"][0]["voice"], "Kore");
+    }
+
+    #[test]
+    fn gemini_raw_pcm_gets_a_wav_header() {
+        let wav = pcm_to_wav(&[1, 0, 2, 0]);
+        assert!(is_wav(&wav));
+        assert_eq!(wav.len(), 48);
+        assert_eq!(&wav[24..28], &24_000u32.to_le_bytes());
+        assert_eq!(&wav[40..44], &4u32.to_le_bytes());
+    }
+
+    #[tokio::test]
+    async fn gemini_refusals_tell_the_agent_what_to_do() {
+        let client = http_client().unwrap();
+        assert_eq!(gemini_speak(&client, "http://unused", "", "Halo").await, Err(VoiceError::NoKey));
+        for (status, body, want) in [
+            (400, r#"{"error":{"status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}"#, VoiceError::BadKey),
+            (403, r#"{"error":{"status":"PERMISSION_DENIED"}}"#, VoiceError::BadKey),
+            (429, r#"{"error":{"status":"RESOURCE_EXHAUSTED","message":"You exceeded your current quota"}}"#, VoiceError::NoBalance),
+            (429, r#"{"error":{"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded for requests per minute"}}"#, VoiceError::Busy),
+            (500, "{}", VoiceError::Failed),
+            (200, r#"{"steps":[]}"#, VoiceError::Failed),
+        ] {
+            let f = fake(move |_, _| (status, body.into())).await;
+            assert_eq!(gemini_speak(&client, &f.base, "AIza-1", "Halo").await, Err(want), "{status} {body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn gemini_key_check_asks_for_the_speech_model() {
+        let f = fake(|_, _| (200, r#"{"name":"models/gemini-3.8-flash-tts"}"#.into())).await;
+        let client = http_client().unwrap();
+        assert!(key_check(&client, VoiceSource::Gemini, &f.base, "AIza-1").await.ok);
+        assert_eq!(f.hits("/api/v1beta/models/gemini-3.8-flash-tts")[0].goog_key.as_deref(), Some("AIza-1"));
+        let bad = fake(|_, _| (400, r#"{"error":{"details":[{"reason":"API_KEY_INVALID"}]}}"#.into())).await;
+        assert_eq!(gemini_check(&client, &bad.base, "x").await.error.as_deref(), Some("bad-key"));
     }
 
     #[tokio::test]
