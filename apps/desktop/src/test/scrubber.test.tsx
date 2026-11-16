@@ -237,21 +237,23 @@ describe('Preview layout', () => {
   });
 
   it('sizes the frame box from the measured stage, keeping the video shape, so marks land on the picture', async () => {
-    let report: ResizeObserverCallback = () => {};
+    // Each observed element keeps its own callback: the stage and the strip are both measured.
+    const callbacks = new Map<Element, ResizeObserverCallback>();
     const observed: Element[] = [];
     class MeasuringRO {
-      constructor(cb: ResizeObserverCallback) {
-        report = cb;
-      }
+      constructor(private cb: ResizeObserverCallback) {}
       observe(el: Element) {
         observed.push(el);
+        callbacks.set(el, this.cb);
       }
       unobserve() {}
       disconnect() {}
     }
     vi.stubGlobal('ResizeObserver', MeasuringRO);
     const measure = (width: number, height: number) =>
-      act(() => report([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver));
+      act(() =>
+        callbacks.get(screen.getByTestId('preview-stage'))!([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver),
+      );
     try {
       render(<Preview projectId="p1" chatId="c1" />);
       await screen.findByRole('slider');

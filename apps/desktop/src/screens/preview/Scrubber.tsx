@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatTimecode } from '@tayang/shared';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,9 @@ export function waveformPath(peaks: number[]): string {
   return `M0 1${top}L${peaks.length} 1${bottom}Z`;
 }
 
+/** A subtitle block narrower than this (px) shows no text: it would only show a letter or two. */
+const CAPTION_TEXT_MIN_PX = 40;
+
 /** Where a span of time sits on the strip, in % of its width; null when it doesn't show. */
 function spanPct(startSec: number, endSec: number, durationSec: number) {
   const left = (startSec / durationSec) * 100;
@@ -64,6 +67,15 @@ export function Scrubber({ durationSec, fps, frame, thumbnails, onSeek, scenes, 
   const last = total - 1;
   const ref = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
+  // The strip's width in px: a subtitle shows its text only when its block has room for it.
+  const [stripWidth, setStripWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => setStripWidth(entries[0]?.contentRect.width ?? 0));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   /** The frame under the pointer while it hovers the strip without pressing. */
   const [hover, setHover] = useState<number | null>(null);
 
@@ -185,6 +197,7 @@ export function Scrubber({ durationSec, fps, frame, thumbnails, onSeek, scenes, 
             {captions.map((c, i) => {
               const at = spanPct(c.startSec, c.endSec, durationSec);
               if (!at) return null;
+              const roomy = ((c.endSec - c.startSec) / durationSec) * stripWidth >= CAPTION_TEXT_MIN_PX;
               return (
                 <button
                   key={`${c.startSec}-${i}`}
@@ -196,12 +209,12 @@ export function Scrubber({ durationSec, fps, frame, thumbnails, onSeek, scenes, 
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => onSeek(clamp(Math.round(c.startSec * fps)))}
                   className={cn(
-                    'absolute inset-y-0.5 cursor-pointer overflow-hidden rounded-sm border-l px-0.5 text-left text-[10px] leading-4 whitespace-nowrap',
-                    c === nowCaption ? 'border-foreground bg-foreground/15 text-foreground' : 'border-hairline text-text-3 hover:text-text-2',
+                    'absolute inset-y-0.5 cursor-pointer overflow-hidden rounded-sm border-l border-ink px-0.5 text-left text-[10px] leading-4 whitespace-nowrap',
+                    c === nowCaption ? 'bg-foreground/40 text-foreground' : 'bg-foreground/10 text-text-2 hover:bg-foreground/20',
                   )}
                   style={at}
                 >
-                  {c.text}
+                  {roomy && <span className="block truncate">{c.text}</span>}
                 </button>
               );
             })}
