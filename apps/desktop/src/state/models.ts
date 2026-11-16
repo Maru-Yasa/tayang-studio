@@ -13,10 +13,22 @@ const withoutUncached = (byAgent: Partial<Record<AgentId, AgentModels>>) =>
     Record<AgentId, AgentModels>
   >;
 
+/** Your API's models are `tayang/<model>` (its one provider). Another agent reporting them is the
+ *  old Your API session of a chat that switched agents, never that agent's own list. */
+const API_PREFIX = 'tayang/';
+const hasApiModels = (m: AgentModels) => m.options.some((o) => o.value.startsWith(API_PREFIX));
+const belongsTo = (agent: AgentId, m: AgentModels) => agent === 'custom' || !hasApiModels(m);
+
 function loadCache(): Partial<Record<AgentId, AgentModels>> {
   try {
     const raw = JSON.parse(localStorage.getItem(CACHE_KEY) ?? 'null') as unknown;
-    return raw && typeof raw === 'object' ? withoutUncached(raw as Partial<Record<AgentId, AgentModels>>) : {};
+    if (!raw || typeof raw !== 'object') return {};
+    // Lists kept before Your API's models could leak into them are dropped and asked for again.
+    return Object.fromEntries(
+      Object.entries(withoutUncached(raw as Partial<Record<AgentId, AgentModels>>)).filter(
+        ([agent, m]) => Array.isArray(m?.options) && belongsTo(agent as AgentId, m),
+      ),
+    ) as Partial<Record<AgentId, AgentModels>>;
   } catch {
     return {};
   }
@@ -30,9 +42,12 @@ function saveCache(byAgent: Partial<Record<AgentId, AgentModels>>) {
   }
 }
 
+/** What a chat's session reported, and the agent the chat had then. */
+export type ChatModels = AgentModels & { agent?: AgentId };
+
 interface ModelsState {
   /** What each running chat's session reports. */
-  byChat: Record<string, AgentModels>;
+  byChat: Record<string, ChatModels>;
   /** The last list each agent reported, kept between launches so the picker has it before a session. */
   byAgent: Partial<Record<AgentId, AgentModels>>;
   /** An agent being asked for its models right now. */
@@ -70,9 +85,9 @@ export const useModels = create<ModelsState>((set, get) => ({
     const info = { current, options };
     const agent = useChat.getState().rows[chatId]?.agentId;
     set((s) => {
-      const byAgent = agent && options.length ? { ...s.byAgent, [agent]: info } : s.byAgent;
+      const byAgent = agent && options.length && belongsTo(agent, info) ? { ...s.byAgent, [agent]: info } : s.byAgent;
       if (byAgent !== s.byAgent) saveCache(byAgent);
-      return { byChat: { ...s.byChat, [chatId]: info }, byAgent };
+      return { byChat: { ...s.byChat, [chatId]: { ...info, agent } }, byAgent };
     });
   },
   load: async (agent, force = false) => {
@@ -81,7 +96,7 @@ export const useModels = create<ModelsState>((set, get) => ({
     try {
       const info = await agentModels(agent);
       set((s) => {
-        const byAgent = info?.options.length ? { ...s.byAgent, [agent]: info } : s.byAgent;
+        const byAgent = info?.options.length && belongsTo(agent, info) ? { ...s.byAgent, [agent]: info } : s.byAgent;
         if (byAgent !== s.byAgent) saveCache(byAgent);
         return { byAgent };
       });
@@ -95,7 +110,13 @@ export const useModels = create<ModelsState>((set, get) => ({
 
 const NO_OPTIONS: ModelChoice[] = [];
 
+/** What the chat's session reported, when it is this agent's (not an earlier agent's of the chat). */
+export function chatModels(s: Pick<ModelsState, 'byChat'>, agent: AgentId, chatId: string | null): ChatModels | undefined {
+  const m = chatId ? s.byChat[chatId] : undefined;
+  return m && (m.agent ?? agent) === agent && belongsTo(agent, m) ? m : undefined;
+}
+
 /** The options to pick from for an agent: the chat's live session first, else the last list seen. */
 export function modelOptions(s: Pick<ModelsState, 'byChat' | 'byAgent'>, agent: AgentId, chatId: string | null): ModelChoice[] {
-  return (chatId ? s.byChat[chatId]?.options : undefined) ?? s.byAgent[agent]?.options ?? NO_OPTIONS;
+  return chatModels(s, agent, chatId)?.options ?? s.byAgent[agent]?.options ?? NO_OPTIONS;
 }
