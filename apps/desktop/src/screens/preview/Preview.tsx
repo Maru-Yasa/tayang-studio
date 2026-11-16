@@ -14,11 +14,13 @@ import {
   mediaProbe,
   mediaRender,
   mediaThumbnails,
+  previewLayers,
   previewStart,
   previewStatus,
   previewStill,
   previewStop,
   type PreviewStatus,
+  type TimelineLayers,
 } from '@/lib/ipc';
 import { LIVE_LOADING, createLiveSource, type LiveSource, type LiveState } from '@/lib/liveSource';
 import { NOTHING_TO_RENDER } from '@/lib/renderErrors';
@@ -126,6 +128,9 @@ export function Preview({
   const [live, setLive] = useState<LiveState>(LIVE_LOADING);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const sourceRef = useRef<LiveSource | null>(null);
+  // Voice and subtitles under the strip; kept as the same object while they don't change.
+  const [layers, setLayers] = useState<TimelineLayers | null>(null);
+  const layersKey = useRef('');
 
   // The stage's content size, measured: the frame box is sized from it in px on every platform.
   const [stage, setStage] = useState<{ width: number; height: number } | null>(null);
@@ -155,15 +160,28 @@ export function Preview({
     }
   }, [projectId]);
 
+  const loadLayers = useCallback(async () => {
+    try {
+      const next = await previewLayers(projectId);
+      const key = JSON.stringify(next ?? null);
+      if (key === layersKey.current) return;
+      layersKey.current = key;
+      setLayers(next ?? null);
+    } catch {
+      // No layers is fine: the strip shows alone.
+    }
+  }, [projectId]);
+
   const load = useCallback(async () => {
     void checkLive();
+    void loadLayers();
     const [path, probe] = await Promise.all([mediaLatestRender(projectId), mediaProbe(projectId)]);
     setVideoPath(path);
     setInfo(probe);
     setFrame(0);
     setPlaying(false);
     setThumbs(path && probe ? (await mediaThumbnails(projectId, THUMBS)).map(assetUrl) : []);
-  }, [projectId, checkLive]);
+  }, [projectId, checkLive, loadLayers]);
 
   useEffect(() => {
     let alive = true;
@@ -201,6 +219,12 @@ export function Preview({
     const id = setInterval(() => void checkLive(), STATUS_POLL_MS);
     return () => clearInterval(id);
   }, [isLive, checkLive]);
+
+  // The agent rewrites the voice, the subtitles or the composition while the panel is open.
+  useEffect(() => {
+    const id = setInterval(() => void loadLayers(), STATUS_POLL_MS);
+    return () => clearInterval(id);
+  }, [loadLayers]);
 
   // Start the project's preview server while the live preview shows; stop it when it goes away.
   useEffect(() => {
@@ -441,7 +465,7 @@ export function Preview({
           </span>
         </div>
 
-        <Scrubber durationSec={durationSec} fps={fps} frame={frame} thumbnails={thumbs} onSeek={seek} scenes={scenes} />
+        <Scrubber durationSec={durationSec} fps={fps} frame={frame} thumbnails={thumbs} onSeek={seek} scenes={scenes} layers={layers} />
 
         <div className="flex">
           <Button

@@ -13,6 +13,7 @@ vi.mock('@/lib/ipc', () => ({
   previewStart: vi.fn(),
   previewStop: vi.fn().mockResolvedValue(undefined),
   previewStill: vi.fn().mockResolvedValue('/p/.tayang/frames/frame-1000.png'),
+  previewLayers: vi.fn(),
 }));
 
 import * as ipc from '@/lib/ipc';
@@ -33,6 +34,13 @@ function harness(data: object) {
   return iframe;
 }
 
+/** The live iframe, once the panel listens to it (its effects have run). */
+async function liveFrame() {
+  const iframe = (await screen.findByTestId('live-preview')) as HTMLIFrameElement;
+  await act(async () => {});
+  return iframe;
+}
+
 const ready = (frame = 0) => harness({ type: 'ready', fps: 30, durationInFrames: 300, width: 1080, height: 1920, frame });
 
 beforeEach(() => {
@@ -40,6 +48,7 @@ beforeEach(() => {
   m.previewStart.mockResolvedValue({ url: URL_, engine: 'hyperframes' });
   m.previewStop.mockResolvedValue(undefined);
   m.mediaThumbnails.mockResolvedValue([]);
+  m.previewLayers.mockResolvedValue({ voice: [], captions: [], voiceSource: null });
 });
 
 describe('Preview: live from the code', () => {
@@ -49,7 +58,7 @@ describe('Preview: live from the code', () => {
     m.previewStatus.mockResolvedValue({ engine: 'hyperframes', codeNewer: true });
     render(<Preview projectId="p1" chatId="c1" />);
 
-    const iframe = (await screen.findByTestId('live-preview')) as HTMLIFrameElement;
+    const iframe = await liveFrame();
     expect(iframe.getAttribute('src')).toBe(URL_);
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin');
     expect(m.previewStart).toHaveBeenCalledWith('p1');
@@ -92,7 +101,7 @@ describe('Preview: live from the code', () => {
     m.mediaProbe.mockResolvedValue(null);
     m.previewStatus.mockResolvedValue({ engine: 'remotion', codeNewer: true });
     render(<Preview projectId="p1" chatId="c1" />);
-    await screen.findByTestId('live-preview');
+    await liveFrame();
     harness({ type: 'error', message: "Live preview needs the project's packages installed" });
     expect(screen.getByRole('alert')).toHaveTextContent("Live preview needs the project's packages installed");
   });
@@ -139,5 +148,24 @@ describe('Preview: live from the code', () => {
     await screen.findByTestId('live-preview');
     second.unmount();
     expect(m.previewStop).toHaveBeenCalledWith('p1');
+  });
+
+  it('shows the voice and subtitle layers under the strip of the live preview', async () => {
+    m.mediaLatestRender.mockResolvedValue(null);
+    m.mediaProbe.mockResolvedValue(null);
+    m.previewStatus.mockResolvedValue({ engine: 'hyperframes', codeNewer: true });
+    m.previewLayers.mockResolvedValue({
+      voice: [{ startSec: 0, durationSec: 10, peaks: [0.5, 1] }],
+      captions: [{ startSec: 1, endSec: 2, text: 'Halo' }],
+      voiceSource: 'layers',
+    });
+    render(<Preview projectId="p1" chatId="c1" />);
+    const iframe = await liveFrame();
+    const post = vi.spyOn(iframe.contentWindow!, 'postMessage');
+    ready();
+    expect(await screen.findByTestId('layer-voice')).toBeInTheDocument();
+    expect(m.previewLayers).toHaveBeenCalledWith('p1');
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to this subtitle: Halo' }));
+    expect(post).toHaveBeenLastCalledWith({ tayangPreview: PREVIEW_PROTOCOL, type: 'seek', frame: 30 }, ORIGIN);
   });
 });
