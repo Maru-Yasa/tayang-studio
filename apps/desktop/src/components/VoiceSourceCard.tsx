@@ -4,6 +4,7 @@ import { Check, ChevronDown, RefreshCw } from 'lucide-react';
 import { findPlan, type Settings, type VoiceCheck, type VoiceErrorCode, type VoiceKeySource, type VoiceSource } from '@tayang/shared';
 import elevenlabs from '@/assets/brand/elevenlabs.svg';
 import fishaudio from '@/assets/brand/fishaudio.svg';
+import gemini from '@/assets/brand/googlegemini.svg';
 import tayang from '@/assets/brand/oyen-symbol-color.svg';
 import voicestudio from '@/assets/brand/voicestudio.svg';
 import { Button } from '@/components/Button';
@@ -23,13 +24,15 @@ const SOURCES: { id: VoiceSource; name: string; logo: string }[] = [
   { id: 'tayang', name: 'Tayang', logo: tayang },
   { id: 'elevenlabs', name: 'ElevenLabs', logo: elevenlabs },
   { id: 'fishaudio', name: 'Fish Audio', logo: fishaudio },
+  { id: 'gemini', name: 'Gemini', logo: gemini },
   { id: 'voicestudio', name: 'VoiceStudio', logo: voicestudio },
 ];
 const KEYS_URL: Record<VoiceKeySource, string> = {
   elevenlabs: 'https://elevenlabs.io/app/settings/api-keys',
   fishaudio: 'https://fish.audio/app/api-keys',
+  gemini: 'https://aistudio.google.com/apikey',
 };
-const isKeySource = (s: VoiceSource): s is VoiceKeySource => s === 'elevenlabs' || s === 'fishaudio';
+const isKeySource = (s: VoiceSource): s is VoiceKeySource => s in KEYS_URL;
 const sourceOf = (id: VoiceSource) => SOURCES.find((s) => s.id === id) ?? SOURCES[0]!;
 
 type ErrorKey = 'noKey' | 'badKey' | 'noBalance' | 'notRunning' | 'busy' | 'failed';
@@ -83,7 +86,7 @@ function TayangPanel() {
   );
 }
 
-/** ElevenLabs or Fish Audio: the API key, and what trying it said. */
+/** ElevenLabs, Fish Audio or Gemini: the API key, and what trying it said. */
 function KeyPanel({ source, active, inUse, hasKey, onHasKey, onSaved }: {
   source: VoiceKeySource;
   active: boolean;
@@ -143,7 +146,10 @@ function KeyPanel({ source, active, inUse, hasKey, onHasKey, onSaved }: {
 
   return (
     <>
-      <span className="text-[13px] text-text-2">{t('voice.keyText', { name })}</span>
+      <span className="text-[13px] text-text-2">
+        {t('voice.keyText', { name })}
+        {source === 'gemini' && ` ${t('voice.geminiNote')}`}
+      </span>
       <div className="flex flex-col gap-2">
         <label htmlFor={`${source}-key`} className="text-[13px] text-[#D9D9D9]">
           {t('voice.keyLabel', { name })}{' '}
@@ -181,8 +187,8 @@ function KeyPanel({ source, active, inUse, hasKey, onHasKey, onSaved }: {
 }
 
 /**
- * Settings › Tools: where voice-overs come from. Tayang credits, the user's own ElevenLabs or Fish
- * Audio key, or VoiceStudio on this computer. Agents always call Tayang's /voice; this picks who speaks.
+ * Settings › Tools: where voice-overs come from. Tayang credits, the user's own ElevenLabs, Fish
+ * Audio or Gemini key, or VoiceStudio on this computer. Agents always call Tayang's /voice; this picks who speaks.
  */
 export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onSaved(s: Settings): void }) {
   const { t } = useTranslation();
@@ -190,12 +196,12 @@ export function VoiceSourceCard({ settings, onSaved }: { settings: Settings; onS
   /** A source with a key that was picked to set up its key: its panel is open even while another source is in use. */
   const [setup, setSetup] = useState<VoiceKeySource | null>(null);
   const shown: VoiceSource = setup ?? active;
-  const [hasKey, setHasKey] = useState<Record<VoiceKeySource, boolean>>({ elevenlabs: false, fishaudio: false });
+  const [hasKey, setHasKey] = useState<Record<VoiceKeySource, boolean>>({ elevenlabs: false, fishaudio: false, gemini: false });
   const [studio, setStudio] = useState<VoiceCheck | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    voiceStatus().then((s) => setHasKey({ elevenlabs: s.hasElevenKey, fishaudio: s.hasFishKey }), () => {});
+    voiceStatus().then((s) => setHasKey({ elevenlabs: s.hasElevenKey, fishaudio: s.hasFishKey, gemini: s.hasGeminiKey }), () => {});
   }, []);
 
   const checkStudio = () => {

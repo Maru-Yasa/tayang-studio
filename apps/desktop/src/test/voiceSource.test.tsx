@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   plan.signedIn = true;
   plan.status = { active: true, plan: 'creator' };
-  vi.mocked(ipc.voiceStatus).mockResolvedValue({ hasElevenKey: false, hasFishKey: false });
+  vi.mocked(ipc.voiceStatus).mockResolvedValue({ hasElevenKey: false, hasFishKey: false, hasGeminiKey: false });
   vi.mocked(ipc.updateSettings).mockImplementation(async (patch) => ({ ...base, ...patch }) as Settings);
 });
 
@@ -48,7 +48,7 @@ describe('VoiceSourceCard', () => {
 
     await user.click(screen.getByRole('button', { name: 'Voice source: Tayang' }));
     const items = await screen.findAllByRole('menuitem');
-    expect(items.map((i) => i.textContent)).toEqual(['Tayang', 'ElevenLabsNeeds an API key', 'Fish AudioNeeds an API key', 'VoiceStudio']);
+    expect(items.map((i) => i.textContent)).toEqual(['Tayang', 'ElevenLabsNeeds an API key', 'Fish AudioNeeds an API key', 'GeminiNeeds an API key', 'VoiceStudio']);
     // Only the one in use carries the check.
     expect(within(items[0]!).getByTestId('voice-check')).toBeTruthy();
     expect(screen.getAllByTestId('voice-check')).toHaveLength(1);
@@ -98,6 +98,21 @@ describe('VoiceSourceCard', () => {
     expect(within(screen.getByRole('button', { name: 'Voice source: Fish Audio' })).queryByText('Not on yet')).toBeNull();
   });
 
+  it('Gemini takes a Google AI Studio key and says it is billed to the Google project (issue #19)', async () => {
+    vi.mocked(ipc.voiceKeySave).mockResolvedValue([{ ok: true, error: null, hasCredit: null }, withSource('gemini')]);
+    const onSaved = vi.fn();
+    render(<VoiceSourceCard settings={base} onSaved={onSaved} />);
+    const user = userEvent.setup();
+    await pick(user, 'Gemini');
+    expect(screen.getByText(/billed to your Google project/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Get a key' })).toHaveProperty('href', 'https://aistudio.google.com/apikey');
+    await user.type(screen.getByLabelText(/Gemini API key/), 'AIza-1');
+    await user.click(screen.getByRole('button', { name: 'Check and use' }));
+    expect(ipc.voiceKeySave).toHaveBeenCalledWith('gemini', 'AIza-1');
+    expect(await screen.findByText('Connected. Voiceovers use your Gemini account')).toBeTruthy();
+    expect(onSaved).toHaveBeenCalledWith(withSource('gemini'));
+  });
+
   it('says when the free model speaks, and why a key was refused', async () => {
     const user = userEvent.setup();
     vi.mocked(ipc.voiceKeySave).mockResolvedValueOnce([{ ok: true, error: null, hasCredit: false }, withSource('fishaudio')]);
@@ -121,7 +136,7 @@ describe('VoiceSourceCard', () => {
   });
 
   it('a saved key switches to Fish Audio in one pick, and can be removed', async () => {
-    vi.mocked(ipc.voiceStatus).mockResolvedValue({ hasElevenKey: false, hasFishKey: true });
+    vi.mocked(ipc.voiceStatus).mockResolvedValue({ hasElevenKey: false, hasFishKey: true, hasGeminiKey: false });
     vi.mocked(ipc.voiceKeyClear).mockResolvedValue(base);
     const onSaved = vi.fn();
     const { rerender } = render(<VoiceSourceCard settings={base} onSaved={onSaved} />);

@@ -1226,6 +1226,7 @@ export const en = {
     keySave: 'Check and use',
     keyRemove: 'Remove key',
     connected: 'Connected. Voiceovers use your {{name}} account',
+    geminiNote: 'Make a free key in Google AI Studio. Voiceovers are billed to your Google project and keep working when you sign out of Tayang.',
     fishFree: "Connected. Your API balance is empty, so voiceovers use Fish Audio's free model",
     notYet: 'Not on yet. Voiceovers still use {{name}} until the API key is saved',
     pending: 'Not on yet',
