@@ -23,7 +23,7 @@ import { assetUrl, attachFile, detectAgents, setAgentModel } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/state/app';
 import { autoOn, useChat, type StyleRef } from '@/state/chat';
-import { modelOptions, useModels } from '@/state/models';
+import { chatModels, modelOptions, useModels } from '@/state/models';
 import { track } from '@/lib/analytics';
 
 export const QUICK_CHIPS = ['faster', 'bigger', 'colors', 'music', 'short'] as const;
@@ -171,7 +171,7 @@ export function ModelPicker({ agent, chatId, disabled }: { agent: AgentId; chatI
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const picked = useApp((s) => s.settings?.agentModels?.[agent] ?? null);
-  const live = useModels((s) => (chatId ? (s.byChat[chatId]?.current ?? null) : null));
+  const live = useModels((s) => chatModels(s, agent, chatId)?.current ?? null);
   const options = useModels((s) => modelOptions(s, agent, chatId));
   const loading = useModels((s) => !!s.loading[agent]);
   const failed = useModels((s) => s.failed[agent] ?? null);

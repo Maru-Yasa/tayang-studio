@@ -73,6 +73,35 @@ describe('ModelPicker', () => {
     expect(JSON.parse(localStorage.getItem('tayang.agentModels')!).custom).toBeUndefined();
   });
 
+  describe("Your API's models stay out of other agents' menus (issue #26)", () => {
+    const API = [{ value: 'tayang/claude-fable-5', name: 'Your API/claude-fable-5' }];
+
+    it("a chat switched from Your API to opencode doesn't offer the old session's models", async () => {
+      useChat.setState({ rows: { c1: { id: 'c1', agentId: 'custom' } } } as never);
+      useModels.getState().report('c1', { kind: 'models', current: 'tayang/claude-fable-5', options: API });
+      useChat.setState({ rows: { c1: { id: 'c1', agentId: 'opencode' } } } as never);
+      useModels.setState({ byAgent: { opencode: { current: null, options: OPTIONS } } });
+      picker('c1');
+      await userEvent.click(screen.getByRole('button', { name: /^Model:/ }));
+      expect(await screen.findByRole('option', { name: 'Big Pickle' })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: /claude-fable-5/ })).toBeNull();
+    });
+
+    it("a late report from the old Your API session isn't kept as opencode's list", () => {
+      useChat.setState({ rows: { c1: { id: 'c1', agentId: 'opencode' } } } as never);
+      useModels.getState().report('c1', { kind: 'models', current: 'tayang/claude-fable-5', options: API });
+      expect(useModels.getState().byAgent.opencode).toBeUndefined();
+      expect(localStorage.getItem('tayang.agentModels')).toBeNull();
+    });
+
+    it('drops a kept opencode list that has Your API models in it', async () => {
+      localStorage.setItem('tayang.agentModels', JSON.stringify({ opencode: { current: null, options: [...OPTIONS, ...API] } }));
+      vi.resetModules();
+      const { useModels: fresh } = await import('@/state/models');
+      expect(fresh.getState().byAgent.opencode).toBeUndefined();
+    });
+  });
+
   it('shows a loading state while the agent is asked for its models', async () => {
     let answer: (v: { current: string | null; options: typeof OPTIONS }) => void = () => {};
     vi.mocked(ipc.agentModels).mockReturnValue(new Promise((r) => (answer = r)));
