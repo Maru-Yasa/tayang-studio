@@ -1,5 +1,5 @@
 import { slugify, type Project, type Settings, type Style, type VideoLanguage } from '@tayang/shared';
-import { AI_ASSETS_RULE, FOREGROUND_RULE, POST_RULE, RENDERS_RULE, STYLE_REFS_DIR, frameCheckPrompt } from './frameCheck';
+import { AI_ASSETS_RULE, FOREGROUND_RULE, LAYERS_RULE, POST_RULE, RENDERS_RULE, STYLE_REFS_DIR, frameCheckPrompt } from './frameCheck';
 
 const LANGUAGE: Record<VideoLanguage, string> = { id: 'Indonesian', en: 'English' };
 
@@ -66,6 +66,7 @@ export function buildProjectBrief(
     '- Keep all files in this folder. Do not write outside it.',
     `- ${FOREGROUND_RULE}`,
     `- ${RENDERS_RULE}`,
+    `- ${LAYERS_RULE}`,
     `- ${POST_RULE}`,
     `- ${AI_ASSETS_RULE}`,
     ...(template

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildSessionPreamble, languageHint, sessionFacts } from '../src/preamble';
 import { AUTOPILOT_RENDER_NOW, buildAutopilotBuildPrompt } from '../src/autopilot';
-import { FOREGROUND_RULE, RENDERS_RULE, SHEET_STEP, frameCheckPrompt } from '../src/frameCheck';
+import { FOREGROUND_RULE, LAYERS_RULE, RENDERS_RULE, SHEET_STEP, frameCheckPrompt } from '../src/frameCheck';
 import { buildProjectBrief } from '../src/project';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent-plugin');
@@ -125,6 +125,18 @@ describe('agent plugin', () => {
     expect(read('skills/tayang-studio/SKILL.md')).toContain(`2. ${SHEET_STEP}`);
     expect(frameCheckPrompt()).toContain(`2. ${SHEET_STEP}`);
     expect(frameCheckPrompt({ engine: 'remotion' })).toContain('stills/scene-01.png');
+  });
+
+  it('tells every agent to write the voice and subtitle layers, wherever it gets its instructions', () => {
+    expect(LAYERS_RULE).toContain('.tayang/layers.json');
+    expect(LAYERS_RULE).toContain('"captions": [{"start": <seconds>, "end": <seconds>, "text":');
+    expect(read('skills/tayang-studio/SKILL.md')).toContain(LAYERS_RULE);
+    expect(buildSessionPreamble()).toContain(LAYERS_RULE);
+    expect(buildAutopilotBuildPrompt('Jalur Rempah', 30)).toContain(LAYERS_RULE);
+    const p = { id: 'p', title: 'T', slug: 't', folder: '/w/t', kind: 'explainer', format: '9:16', language: 'id', status: 'draft',
+      styleId: null, scheduledAt: null, reviewState: 'none', postedAt: null, remindedAt: null, reviewRemindedAt: null,
+      durationSec: null, createdAt: '', updatedAt: '' } as const;
+    expect(buildProjectBrief(p, null, { fps: 30, frameCheck: false })).toContain(LAYERS_RULE);
   });
 
   it('tells every agent to leave the final mp4 in renders/, wherever it gets its instructions', () => {
