@@ -8,7 +8,7 @@ import { parseArgs, startServer } from '../src/server.mjs';
 import { confined, ignoredChange } from '../src/files.mjs';
 import { hyperframesPage, previewConfig, remotionEntry } from '../src/project.mjs';
 import { NEEDS_PACKAGES, remotionPackages } from '../src/remotion.mjs';
-import { npxPath } from '../src/hyperframes.mjs';
+import { RUNTIME_ATTR, npxPath, withRuntime } from '../src/hyperframes.mjs';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tayang-preview-test-')));
 const write = (dir, rel, body = '') => {
@@ -103,6 +103,16 @@ test('a Remotion project without its packages asks for them', () => {
   assert.throws(() => remotionPackages(tmp()), new RegExp(NEEDS_PACKAGES));
 });
 
+test('a HyperFrames page gets the runtime first, once', () => {
+  const tag = `<script ${RUNTIME_ATTR}="1" src="/t/__tayang/runtime.js"></script>`;
+  assert.equal(withRuntime('<html><HEAD lang="x"><script src="gsap.js"></script></head></html>', '/t/__tayang/runtime.js'),
+    `<html><HEAD lang="x">\n${tag}<script src="gsap.js"></script></head></html>`);
+  assert.equal(withRuntime('<html><body>x</body></html>', '/t/__tayang/runtime.js'), `<html>${tag}\n<body>x</body></html>`);
+  const has = '<head><script src="https://cdn.jsdelivr.net/npm/@hyperframes/core/dist/hyperframe.runtime.iife.js"></script></head>';
+  assert.equal(withRuntime(has, '/t/__tayang/runtime.js'), has);
+  assert.equal(withRuntime(withRuntime('<head></head>', '/a'), '/b'), withRuntime('<head></head>', '/a'));
+});
+
 test('npx is found next to node', () => {
   assert.equal(npxPath('/usr/local/bin/node', 'darwin'), '/usr/local/bin/npx');
   assert.equal(npxPath('C:\\node\\node.exe', 'win32').endsWith('npx.cmd'), true);
@@ -140,7 +150,11 @@ test('the server needs the token, a loopback Host and the control header for sti
     assert.equal(page.status, 200);
     assert.equal(page.body, '<html>harness</html>');
     assert.equal(page.headers['cache-control'], 'no-store');
-    assert.equal((await request(s.port, { pathname: `/${s.token}/p/compositions/a.html`, headers: host })).body, 'comp');
+    const comp = await request(s.port, { pathname: `/${s.token}/p/compositions/a.html`, headers: host });
+    assert.equal(comp.body, `<script ${RUNTIME_ATTR}="1" src="/${s.token}/__tayang/runtime.js"></script>\ncomp`);
+    const runtime = await request(s.port, { pathname: `/${s.token}/__tayang/runtime.js`, headers: host });
+    assert.equal(runtime.status, 200);
+    assert.match(runtime.headers['content-type'], /javascript/);
     assert.equal((await request(s.port, { pathname: `/${s.token}/p/../../etc/passwd`, headers: host })).status, 404);
     assert.equal((await request(s.port, { pathname: `/${s.token}/compositions/a.html`, headers: host })).status, 404);
     const bridge = await request(s.port, { pathname: `/${s.token}/__tayang/bridge.js`, headers: host });
