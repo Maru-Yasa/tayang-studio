@@ -223,7 +223,7 @@ fn audio_peaks(tools: &MediaTools, file: &Path) -> Option<Peaks> {
         .arg(file)
         .args(["-vn", "-ac", "1", "-ar", &DECODE_RATE.to_string(), "-f", "s16le", "-"]);
     let out = media::run_within(cmd, "ffmpeg", Duration::from_secs(60)).ok()?;
-    let samples: Vec<i16> = out.stdout.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+    let samples: Vec<i16> = out.stdout.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
     if samples.is_empty() {
         return None;
     }
