@@ -978,7 +978,32 @@ pub fn sweep_study_dirs(working: &Path) {
 
 /// Arguments for `npx` (pinned, non-interactive), run with `folder` as the working directory.
 /// `--output` pins the file into `<folder>/renders/`.
-pub fn render_args(folder: &Path) -> Vec<String> {
+/// HyperFrames' GPU encoding flag. It probes for a usable encoder (VideoToolbox, NVENC, QSV) and
+/// encodes on the CPU without one.
+pub const HYPERFRAMES_GPU: &str = "--gpu";
+/// Remotion's: hardware encoding where the codec and computer allow it, else the CPU.
+pub const REMOTION_GPU: &str = "--hardware-acceleration=if-possible";
+
+/// A render command with the encoding the user picked: a HyperFrames or Remotion render gets its
+/// GPU flag when `gpu`, and loses it when not; any other command (a template's own pipeline) is kept.
+pub fn accelerate(argv: &[String], gpu: bool) -> Vec<String> {
+    let tool = |name: &str| argv.iter().any(|a| a == name || a.starts_with(&format!("{name}@")) || a.ends_with(&format!("/{name}")));
+    let renders = argv.iter().any(|a| a == "render");
+    let (flag, is_flag): (&str, fn(&str) -> bool) = if renders && tool("hyperframes") {
+        (HYPERFRAMES_GPU, |a| a == "--gpu")
+    } else if renders && (tool("remotion") || tool("@remotion/cli")) {
+        (REMOTION_GPU, |a| a.starts_with("--hardware-acceleration"))
+    } else {
+        return argv.to_vec();
+    };
+    let mut out: Vec<String> = argv.iter().filter(|a| !is_flag(a)).cloned().collect();
+    if gpu {
+        out.push(flag.to_string());
+    }
+    out
+}
+
+pub fn render_args(folder: &Path, gpu: bool) -> Vec<String> {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -992,6 +1017,9 @@ pub fn render_args(folder: &Path) -> Vec<String> {
         out.to_string_lossy().into_owned(),
         "--quiet".into(),
     ]
+    .into_iter()
+    .chain(gpu.then(|| HYPERFRAMES_GPU.to_string()))
+    .collect()
 }
 
 /// What `tayang.json` asks for (`engine` and `readme` are for the agent, not for rendering).
@@ -1090,8 +1118,8 @@ pub fn render_plan(folder: &Path, unix_secs: u64) -> Result<Option<RenderPlan>> 
 }
 
 /// The render command to show the user: the `tayang.json` one, or `None` for the HyperFrames default.
-pub fn render_command(folder: &Path, unix_secs: u64) -> Result<Option<RenderPlan>> {
-    render_plan(folder, unix_secs)
+pub fn render_command(folder: &Path, unix_secs: u64, gpu: bool) -> Result<Option<RenderPlan>> {
+    Ok(render_plan(folder, unix_secs)?.map(|p| RenderPlan { render: accelerate(&p.render, gpu), ..p }))
 }
 
 /// Resolves argv[0] the way detection does (GUI apps can start with a minimal PATH).
@@ -1109,13 +1137,14 @@ fn argv_command(argv: &[String], folder: &Path) -> Command {
     cmd
 }
 
-pub fn render(folder: &Path) -> Result<PathBuf> {
+/// Renders the project; `gpu` picks GPU encoding (falling back to the CPU without one).
+pub fn render(folder: &Path, gpu: bool) -> Result<PathBuf> {
     std::fs::create_dir_all(folder.join("renders")).map_err(|e| e.to_string())?;
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    if let Some(plan) = render_plan(folder, secs)? {
+    if let Some(plan) = render_command(folder, secs, gpu)? {
         if let Some(install) = &plan.install {
             run(argv_command(install, folder), "template install")?;
         }
@@ -1137,7 +1166,7 @@ pub fn render(folder: &Path) -> Result<PathBuf> {
     let npx = crate::system::Exec::which(&crate::system::RealExec, "npx")
         .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "npx.cmd" } else { "npx" }));
     let mut cmd = command(npx);
-    cmd.args(render_args(folder)).current_dir(folder);
+    cmd.args(render_args(folder, gpu)).current_dir(folder);
     let done = run(cmd, "hyperframes render")?;
     latest_render(folder).ok_or_else(|| no_mp4(&done))
 }
@@ -2098,11 +2127,32 @@ mod tests {
     #[test]
     fn render_args_sets_output_into_renders() {
         let folder = Path::new("proj dir");
-        let args = render_args(folder);
+        let args = render_args(folder, false);
         assert_eq!(&args[..3], ["-y", "hyperframes@0.9.10", "render"]);
         let i = args.iter().position(|a| a == "--output").unwrap();
         assert!(Path::new(&args[i + 1]).starts_with(folder.join("renders")));
         assert!(args[i + 1].ends_with(".mp4"));
+        assert!(!args.contains(&"--gpu".to_string()));
+        assert_eq!(render_args(folder, true).last().unwrap(), "--gpu");
+    }
+
+    #[test]
+    fn accelerate_adds_or_drops_the_gpu_flag_of_hyperframes_and_remotion_renders() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let hf = v(&["npx", "-y", "hyperframes@0.9.10", "render", "--output", "{output}"]);
+        assert_eq!(accelerate(&hf, true).last().unwrap(), "--gpu");
+        assert_eq!(accelerate(&accelerate(&hf, true), true).iter().filter(|a| *a == "--gpu").count(), 1);
+        assert_eq!(accelerate(&v(&["npx", "hyperframes", "render", "--gpu"]), false), v(&["npx", "hyperframes", "render"]));
+
+        let rm = v(&["npx", "remotion", "render", "src/index.ts", "Geo", "{output}", "--gl=angle"]);
+        assert_eq!(accelerate(&rm, true).last().unwrap(), "--hardware-acceleration=if-possible");
+        assert_eq!(accelerate(&v(&["npx", "remotion", "render", "--hardware-acceleration=required"]), true), v(&["npx", "remotion", "render", "--hardware-acceleration=if-possible"]));
+        assert_eq!(accelerate(&v(&["node_modules/.bin/remotion", "render", "x"]), false), v(&["node_modules/.bin/remotion", "render", "x"]));
+        assert_eq!(accelerate(&v(&["node_modules/.bin/remotion", "render", "x"]), true).last().unwrap(), REMOTION_GPU);
+
+        // Not a render, or another tool: left alone.
+        assert_eq!(accelerate(&v(&["npx", "remotion", "still", "x"]), true), v(&["npx", "remotion", "still", "x"]));
+        assert_eq!(accelerate(&v(&["python3", "pipeline.py", "render"]), true), v(&["python3", "pipeline.py", "render"]));
     }
 
     #[test]
@@ -2134,21 +2184,23 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let folder = tmp.path().join("v");
         std::fs::create_dir_all(&folder).unwrap();
-        assert_eq!(render_command(&folder, 5).unwrap(), None);
+        assert_eq!(render_command(&folder, 5, false).unwrap(), None);
         std::fs::write(folder.join("tayang.json"), r#"{"render":["npx","remotion","render","{output}"]}"#).unwrap();
         let out = Path::new("renders").join("v-5.mp4");
-        let plan = render_command(&folder, 5).unwrap().unwrap();
+        let plan = render_command(&folder, 5, false).unwrap().unwrap();
         assert_eq!(plan.render, ["npx", "remotion", "render", out.to_str().unwrap()]);
+        let gpu = render_command(&folder, 5, true).unwrap().unwrap();
+        assert_eq!(gpu.render, ["npx", "remotion", "render", out.to_str().unwrap(), REMOTION_GPU]);
         assert_eq!(plan.install, None);
         std::fs::write(
             folder.join("tayang.json"),
             r#"{"render":["npx","remotion","render","{output}"],"install":["npm","install"]}"#,
         )
         .unwrap();
-        let plan = render_command(&folder, 5).unwrap().unwrap();
+        let plan = render_command(&folder, 5, false).unwrap().unwrap();
         assert_eq!(plan.install, Some(vec!["npm".to_string(), "install".to_string()]));
         std::fs::create_dir_all(folder.join("node_modules")).unwrap();
-        assert_eq!(render_command(&folder, 5).unwrap().unwrap().install, None, "installed already");
+        assert_eq!(render_command(&folder, 5, false).unwrap().unwrap().install, None, "installed already");
     }
 
     #[test]
@@ -2161,7 +2213,7 @@ mod tests {
     #[test]
     fn a_folder_with_nothing_to_render_says_so() {
         let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(render(tmp.path()).unwrap_err(), NOTHING_TO_RENDER);
+        assert_eq!(render(tmp.path(), false).unwrap_err(), NOTHING_TO_RENDER);
     }
 
     #[test]
@@ -2186,7 +2238,7 @@ mod tests {
             r#"{"render":["node","-e","console.log('Rendered to elsewhere/video.mp4')"]}"#,
         )
         .unwrap();
-        let e = render(tmp.path()).unwrap_err();
+        let e = render(tmp.path(), false).unwrap_err();
         assert!(e.starts_with("render finished but no mp4 was found"), "{e}");
         assert!(e.contains("Rendered to elsewhere/video.mp4"), "{e}");
     }
@@ -2231,7 +2283,7 @@ mod tests {
             r#"{"render":["node","-e","require('fs').writeFileSync(process.argv[1],'x')","{output}"]}"#,
         )
         .unwrap();
-        let out = render(&folder).unwrap();
+        let out = render(&folder, false).unwrap();
         assert!(out.exists());
         assert!(out.starts_with(folder.join("renders")));
     }

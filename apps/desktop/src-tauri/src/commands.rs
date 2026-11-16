@@ -2211,8 +2211,9 @@ pub async fn media_thumbnails(
 #[tauri::command]
 pub async fn media_render(state: State<'_, AppState>, project_id: String) -> CmdResult<String> {
     let folder = project_folder(&state, &project_id)?;
+    let gpu = state.db.get_settings(&state.home).render_acceleration == crate::types::RenderAcceleration::Gpu;
     tauri::async_runtime::spawn_blocking(move || {
-        media::render(&folder).map(|p| path_string(&p))
+        media::render(&folder, gpu).map(|p| path_string(&p))
     })
     .await
     .map_err(err)?
@@ -2281,7 +2282,8 @@ pub fn render_command(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    Ok(media::render_command(&folder, now)?.map(|p| RenderCommand { install: p.install, render: p.render }))
+    let gpu = state.db.get_settings(&state.home).render_acceleration == crate::types::RenderAcceleration::Gpu;
+    Ok(media::render_command(&folder, now, gpu)?.map(|p| RenderCommand { install: p.install, render: p.render }))
 }
 
 /// Rewrites the project's AGENTS.md and CLAUDE.md (e.g. after a template could not be installed).
