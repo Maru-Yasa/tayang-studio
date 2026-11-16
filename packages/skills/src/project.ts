@@ -1,5 +1,5 @@
 import { slugify, type Project, type Settings, type Style, type VideoLanguage } from '@tayang/shared';
-import { AI_ASSETS_RULE, FOREGROUND_RULE, POST_RULE, RENDERS_RULE, STYLE_REFS_DIR, frameCheckPrompt } from './frameCheck';
+import { AI_ASSETS_RULE, FOREGROUND_RULE, LAYERS_RULE, POST_RULE, RENDERS_RULE, STYLE_REFS_DIR, frameCheckPrompt } from './frameCheck';
 
 const LANGUAGE: Record<VideoLanguage, string> = { id: 'Indonesian', en: 'English' };
 
@@ -40,12 +40,20 @@ function styleSection(style: Style): string {
   ].join('\n');
 }
 
+/** The GPU encoding flags Tayang adds to renders (see `media::accelerate` in the desktop app). */
+export const HYPERFRAMES_GPU_FLAG = '--gpu';
+export const REMOTION_GPU_FLAG = '--hardware-acceleration=if-possible';
+
 /** The project's AGENTS.md. The quality loop is only included when `settings.frameCheck` is on. */
 export function buildProjectBrief(
   p: Project,
   style: Style | null,
-  settings: Pick<Settings, 'fps' | 'frameCheck'>,
+  settings: Pick<Settings, 'fps' | 'frameCheck' | 'renderAcceleration'>,
 ): string {
+  // GPU encoding unless the user picked the CPU; both tools fall back to the CPU without a GPU encoder.
+  const gpu = settings.renderAcceleration !== 'cpu';
+  const hfFlag = gpu ? ` ${HYPERFRAMES_GPU_FLAG}` : '';
+  const rmFlag = gpu ? ` ${REMOTION_GPU_FLAG}` : '';
   const template = !!style?.template;
   // A copied style decides its own engine; only a template's own toolchain overrides it.
   const remotion = !template && style?.engine === 'remotion';
@@ -61,21 +69,27 @@ export function buildProjectBrief(
     template
       ? '- Follow STYLE.md for the toolchain; install and render with the commands in tayang.json.'
       : remotion
-        ? '- Build it with Remotion in this folder (set it up with npm if it is not there yet). For a 3D look add three and @remotion/three and build the world in three.js inside Remotion.'
+        ? '- Build it with Remotion in this folder (set it up with npm if it is not there yet, with @remotion/cli installed locally, and the entry point at src/index.ts). For a 3D look add three and @remotion/three and build the world in three.js inside Remotion. Register the composition you render first in the root: Tayang\'s live preview plays the first one, so the user can watch the video before it is rendered.'
         : '- Use HyperFrames (`npx hyperframes`) to build and render the video.',
     '- Keep all files in this folder. Do not write outside it.',
     `- ${FOREGROUND_RULE}`,
     `- ${RENDERS_RULE}`,
+    `- ${LAYERS_RULE}`,
     `- ${POST_RULE}`,
     `- ${AI_ASSETS_RULE}`,
     ...(template
-      ? ['- When a version is ready, render it with the command in tayang.json so Tayang can show it.']
+      ? [
+          '- When a version is ready, render it with the command in tayang.json so Tayang can show it.' +
+            (gpu
+              ? ` When that command is a HyperFrames render add \`${HYPERFRAMES_GPU_FLAG}\`, and when it is a Remotion render add \`${REMOTION_GPU_FLAG}\`: the user picked GPU encoding.`
+              : ` Encode on the CPU: leave out \`${HYPERFRAMES_GPU_FLAG}\` and \`--hardware-acceleration\`, the user picked it.`),
+        ]
       : remotion
         ? [
-            `- When a version is ready, render it with \`npx remotion render <entry> <composition> renders/${p.slug || slugify(p.title)}-<n>.mp4\` so Tayang can show it.`,
+            `- When a version is ready, render it with \`npx remotion render <entry> <composition> renders/${p.slug || slugify(p.title)}-<n>.mp4${rmFlag}\` so Tayang can show it.`,
           ]
         : [
-            `- When a version is ready, render it with \`npx -y hyperframes@0.9.10 render --output renders/${p.slug || slugify(p.title)}-<n>.mp4\` so Tayang can show it.`,
+            `- When a version is ready, render it with \`npx -y hyperframes@0.9.10 render --output renders/${p.slug || slugify(p.title)}-<n>.mp4${hfFlag}\` so Tayang can show it.`,
           ]),
     '',
     '## Style',

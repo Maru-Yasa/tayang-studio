@@ -1,6 +1,6 @@
 import type { Niche, SocialAccount, Style, VideoKind, VideoLanguage, Voice } from '@tayang/shared';
 import { clampTopicLength, FACTS_RULE, MOTION_RULES, VIDEO_KINDS } from './style';
-import { FOREGROUND_RULE, POST_RULE, RENDERS_RULE } from './frameCheck';
+import { FOREGROUND_RULE, LAYERS_RULE, POST_RULE, RENDERS_RULE } from './frameCheck';
 
 // Everything here goes to the agent, never to the user, so it stays in English (i18n-ignore).
 
@@ -94,6 +94,7 @@ export function buildAutopilotBuildPrompt(
     ...(opts.voiceId ? [`For the voice-over use Tayang's /voice with "voice":"${opts.voiceId}" in every call.`] : []),
     FOREGROUND_RULE,
     RENDERS_RULE,
+    LAYERS_RULE,
     POST_RULE,
   ].join('\n');
 }

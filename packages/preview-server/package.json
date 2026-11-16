@@ -1,0 +1,10 @@
+{
+  "name": "@tayang/preview-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Serves a project's live preview (HyperFrames or Remotion) to Tayang's Preview panel. Plain Node, no dependencies: Remotion's bundler and renderer come from the project itself.",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}

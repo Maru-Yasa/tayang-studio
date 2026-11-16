@@ -116,7 +116,8 @@ describe('follow-ups', () => {
     const p = buildAutopilotBuildPrompt('T', 60, { voiceId: 'Rachel' });
     expect(p).toContain('"voice":"Rachel"');
     expect(p).toContain('post.json');
-    expect(buildAutopilotBuildPrompt('T', 60)).not.toContain('"voice":');
+    // The layers rule names a "voice" key too; the picked voice is `"voice":"<id>"`.
+    expect(buildAutopilotBuildPrompt('T', 60)).not.toContain('"voice":"');
   });
 });
 

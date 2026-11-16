@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Tayang live preview</title>
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+      hyperframes-player { display: block; width: 100%; height: 100%; }
+    </style>
+    <script src="__tayang/player.js"></script>
+  </head>
+  <body>
+    <hyperframes-player id="player" src="p/__COMPOSITION__"></hyperframes-player>
+    <script type="module">
+      import { startBridge } from './__tayang/bridge.js';
+      import { clipsOf, createAudioMirror, createFilmClock } from './__tayang/audio-mirror.js';
+      const player = document.getElementById('player');
+      const fps = __FPS__;
+      player.disableClickToPlay = true;
+      // The sound is played here (audio-mirror.js), never by the player: one source, no echo. And the
+      // sound is the clock: the player is never played, it is drawn each frame at the sound's time.
+      player.muted = true;
+      let mirror = createAudioMirror([]);
+      let clock = createFilmClock(mirror, 0);
+      const frame = () => {
+        if (clock.playing) {
+          const now = performance.now();
+          const t = clock.tick(now);
+          player.seek(t);
+          mirror.sync(t, clock.playing, now);
+        }
+        requestAnimationFrame(frame);
+      };
+      startBridge({
+        init: () =>
+          new Promise((resolve, reject) => {
+            const done = () => {
+              const duration = player.duration;
+              if (!(duration > 0)) return reject(new Error('The HyperFrames composition has no length'));
+              try {
+                const doc = player.shadowRoot.querySelector('iframe').contentDocument;
+                mirror = createAudioMirror(clipsOf(doc));
+              } catch {
+                // The composition's document isn't reachable: the picture plays without sound.
+              }
+              clock = createFilmClock(mirror, duration);
+              requestAnimationFrame(frame);
+              resolve({
+                fps,
+                durationInFrames: Math.max(1, Math.round(duration * fps)),
+                width: player.compositionWidth || 1920,
+                height: player.compositionHeight || 1080,
+              });
+            };
+            if (player.ready) return done();
+            player.addEventListener('ready', done, { once: true });
+            player.addEventListener('error', (e) => reject(new Error(e.detail?.message ?? 'The HyperFrames composition failed to load')), { once: true });
+          }),
+        seek: (f) => {
+          clock.seek(f / fps);
+          player.seek(clock.time);
+          // In place and silent; while playing, the next frame starts the clips here and waits for them.
+          mirror.sync(clock.time, false);
+        },
+        play: () => {
+          player.pause();
+          clock.play(performance.now());
+        },
+        pause: () => {
+          clock.pause();
+          mirror.sync(clock.time, false);
+        },
+        setMuted: (m) => mirror.setMuted(m),
+        frame: () => Math.round(clock.time * fps),
+        playing: () => clock.playing,
+      });
+    </script>
+  </body>
+</html>

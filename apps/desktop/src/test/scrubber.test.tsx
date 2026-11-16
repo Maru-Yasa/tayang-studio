@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 
 vi.mock('@/lib/ipc', () => ({
+  latestRenderInfo: vi.fn().mockResolvedValue({ path: "/p/renders/a.mp4", name: "a.mp4", size: 1, modifiedAt: "2026-11-16T13:30:00.000Z" }),
   mediaLatestRender: vi.fn(),
   mediaProbe: vi.fn(),
   mediaExtractFrame: vi.fn(),
@@ -13,7 +14,7 @@ vi.mock('@/lib/ipc', () => ({
 
 import * as ipc from '@/lib/ipc';
 import { Preview, frameBox } from '@/screens/preview/Preview';
-import { Scrubber } from '@/screens/preview/Scrubber';
+import { Scrubber, waveformPath } from '@/screens/preview/Scrubber';
 import { MessageList } from '@/components/MessageList';
 import { setUiLanguage } from '@/i18n';
 import { useChat } from '@/state/chat';
@@ -96,6 +97,111 @@ describe('Scrubber', () => {
   });
 });
 
+describe('Scrubber layers', () => {
+  const layers = {
+    voice: [{ startSec: 17, durationSec: 17, peaks: [0.2, 1, 0.5] }],
+    captions: [
+      { startSec: 10, endSec: 12, text: 'Tahun 1667' },
+      { startSec: 12, endSec: 13.6, text: 'Belanda membuat' },
+    ],
+    voiceSource: 'hyperframes' as const,
+  };
+  const draw = (frame = 330, l: typeof layers | null = layers) => {
+    const onSeek = vi.fn();
+    render(<Scrubber durationSec={34} fps={30} frame={frame} thumbnails={thumbs} onSeek={onSeek} layers={l} />);
+    return onSeek;
+  };
+
+  it('draws the voice where it sits on the film', () => {
+    draw();
+    const row = screen.getByRole('img', { name: 'Voice' });
+    const svg = row.querySelector('svg')!;
+    expect(svg.style.left).toBe('50%');
+    expect(svg.style.width).toBe('50%');
+    expect(svg.getAttribute('viewBox')).toBe('0 0 3 2');
+  });
+
+  it('says when the voice is the render sound', () => {
+    draw(330, { ...layers, voiceSource: 'render' as never });
+    expect(screen.getByRole('img', { name: "Voice: the render's sound" })).toBeInTheDocument();
+  });
+
+  it('shows each subtitle in its time, marks the one playing, and jumps to its start on click', () => {
+    const onSeek = draw(330); // 11 s: inside the first subtitle
+    const first = screen.getByRole('button', { name: 'Jump to this subtitle: Tahun 1667' });
+    const second = screen.getByRole('button', { name: 'Jump to this subtitle: Belanda membuat' });
+    expect(first.style.left).toBe(`${(10 / 34) * 100}%`);
+    expect(first).toHaveAttribute('aria-current', 'true');
+    expect(second).not.toHaveAttribute('aria-current');
+    fireEvent.pointerDown(second, { clientX: 999, pointerId: 1 });
+    fireEvent.click(second);
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(360);
+    expect(screen.getByTestId('scrubber-bubble')).toHaveTextContent('0:11.00 · Tahun 1667');
+  });
+
+  it('scrubs from the layer rows too', () => {
+    const onSeek = draw();
+    const slider = screen.getByRole('slider');
+    slider.getBoundingClientRect = () =>
+      ({ left: 0, width: 1000, top: 0, height: 48, right: 1000, bottom: 48, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    fireEvent.pointerDown(screen.getByTestId('layer-voice'), { clientX: 250, pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledWith(255);
+  });
+
+  it('shows no rows without layers', () => {
+    draw(330, null);
+    expect(screen.queryByTestId('layer-voice')).toBeNull();
+    expect(screen.queryByTestId('layer-captions')).toBeNull();
+  });
+
+  it('makes the waveform one closed mirrored shape', () => {
+    expect(waveformPath([])).toBe('');
+    expect(waveformPath([1, 0])).toBe('M0 1L0.5 0.000L1.5 0.960L2 1L1.5 1.040L0.5 2.000Z');
+  });
+});
+
+describe('Scrubber zoom', () => {
+  const draw = (zoom = 1) => {
+    const onZoom = vi.fn();
+    const onSeek = vi.fn();
+    render(<Scrubber durationSec={34} fps={30} frame={330} thumbnails={thumbs} onSeek={onSeek} zoom={zoom} onZoom={onZoom} />);
+    return { onZoom, onSeek, viewport: screen.getByTestId('scrubber-viewport') };
+  };
+
+  it('draws the timeline zoom times wider, scrolling sideways', () => {
+    const { viewport } = draw(4);
+    expect((viewport.firstElementChild as HTMLElement).style.width).toBe('400%');
+    expect(viewport.className).toMatch(/overflow-x-auto/);
+    cleanup();
+    const fit = draw(1).viewport;
+    expect((fit.firstElementChild as HTMLElement).style.width).toBe('');
+    expect(fit.className).toMatch(/overflow-x-hidden/);
+  });
+
+  it('zooms with + and - on the strip, and 0 shows the whole video', async () => {
+    const { onZoom, onSeek } = draw(4);
+    screen.getByRole('slider').focus();
+    await userEvent.keyboard('=');
+    await userEvent.keyboard('-');
+    await userEvent.keyboard('0');
+    expect(onZoom.mock.calls).toEqual([[8], [2], [1]]);
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it('zooms with Ctrl/⌘ + scroll (a pinch), within the limits; a plain scroll does not zoom', () => {
+    const { onZoom, viewport } = draw(2);
+    fireEvent.wheel(viewport, { deltaY: 10 });
+    expect(onZoom).not.toHaveBeenCalled();
+    const zoomIn = new WheelEvent('wheel', { deltaY: -50, ctrlKey: true, cancelable: true });
+    viewport.dispatchEvent(zoomIn);
+    expect(zoomIn.defaultPrevented).toBe(true);
+    expect(onZoom.mock.calls[0]![0]).toBeCloseTo(2 * Math.exp(0.5));
+    viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: 5000, metaKey: true, cancelable: true }));
+    expect(onZoom.mock.calls[1]![0]).toBe(1);
+  });
+});
+
 describe('Preview layout', () => {
   beforeEach(() => {
     vi.mocked(ipc.mediaLatestRender).mockResolvedValue('/p/out.mp4');
@@ -173,21 +279,23 @@ describe('Preview layout', () => {
   });
 
   it('sizes the frame box from the measured stage, keeping the video shape, so marks land on the picture', async () => {
-    let report: ResizeObserverCallback = () => {};
+    // Each observed element keeps its own callback: the stage and the strip are both measured.
+    const callbacks = new Map<Element, ResizeObserverCallback>();
     const observed: Element[] = [];
     class MeasuringRO {
-      constructor(cb: ResizeObserverCallback) {
-        report = cb;
-      }
+      constructor(private cb: ResizeObserverCallback) {}
       observe(el: Element) {
         observed.push(el);
+        callbacks.set(el, this.cb);
       }
       unobserve() {}
       disconnect() {}
     }
     vi.stubGlobal('ResizeObserver', MeasuringRO);
     const measure = (width: number, height: number) =>
-      act(() => report([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver));
+      act(() =>
+        callbacks.get(screen.getByTestId('preview-stage'))!([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver),
+      );
     try {
       render(<Preview projectId="p1" chatId="c1" />);
       await screen.findByRole('slider');

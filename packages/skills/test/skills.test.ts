@@ -204,10 +204,25 @@ describe('brief', () => {
     expect(b).toContain('[tayang:frames-checked]');
     expect(b).toContain(FRAME_CHECK_PROMPT);
     expect(b).toContain('npx hyperframes');
+    // GPU encoding unless the user picked the CPU.
     expect(b).toContain(
-      'When a version is ready, render it with `npx -y hyperframes@0.9.10 render --output renders/promo-<n>.mp4` so Tayang can show it.',
+      'When a version is ready, render it with `npx -y hyperframes@0.9.10 render --output renders/promo-<n>.mp4 --gpu` so Tayang can show it.',
+    );
+    expect(buildProjectBrief(project, STYLE, { ...settings, renderAcceleration: 'cpu' })).toContain(
+      'render it with `npx -y hyperframes@0.9.10 render --output renders/promo-<n>.mp4` so',
     );
     expect(FRAME_CHECK_PROMPT).toContain(FRAMES_CHECKED_TOKEN);
+  });
+  it('asks Remotion and template renders for the encoding the user picked', () => {
+    const project = { title: 'Promo', kind: 'promo', format: '9:16', language: 'id' } as Project;
+    const remotion = { ...STYLE, engine: 'remotion' } as Style;
+    expect(buildProjectBrief(project, remotion, { fps: 30, frameCheck: false })).toContain(
+      'renders/promo-<n>.mp4 --hardware-acceleration=if-possible` so Tayang can show it.',
+    );
+    expect(buildProjectBrief(project, remotion, { fps: 30, frameCheck: false, renderAcceleration: 'cpu' })).not.toContain('--hardware-acceleration=if-possible');
+    const template = { ...STYLE, template: { url: 'x' } } as never;
+    expect(buildProjectBrief(project, template, { fps: 30, frameCheck: false })).toContain('When that command is a HyperFrames render add `--gpu`');
+    expect(buildProjectBrief(project, template, { fps: 30, frameCheck: false, renderAcceleration: 'cpu' })).toContain('Encode on the CPU');
   });
   it('lists the style notes after the prompt, in order, skipping empty ones', () => {
     const project = { title: 'Promo', kind: 'promo', format: '9:16', language: 'id' } as Project;

@@ -1898,6 +1898,16 @@ describe('Settings', () => {
     expect(autostart.disable).toHaveBeenCalledTimes(1);
   });
 
+  it('picks GPU or CPU encoding for renders under Render, GPU when never set', async () => {
+    openSettingsTab('render');
+    render(<SettingsScreen />);
+    const encoding = await screen.findByRole('tablist', { name: 'Video encoding' });
+    expect(within(encoding).getByRole('tab', { name: 'GPU' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/falls back to the CPU/)).toBeInTheDocument();
+    await userEvent.click(within(encoding).getByRole('tab', { name: 'CPU' }));
+    await waitFor(() => expect(ipc.updateSettings).toHaveBeenCalledWith({ renderAcceleration: 'cpu' }));
+  });
+
   it('toggles frameCheck through updateSettings', async () => {
     openSettingsTab('agents');
     render(<SettingsScreen />);

@@ -343,6 +343,7 @@ impl Db {
             "projectStatusChecked": false,
             "agentModels": {},
             "voiceSource": "tayang",
+            "renderAcceleration": "gpu",
         })
     }
 

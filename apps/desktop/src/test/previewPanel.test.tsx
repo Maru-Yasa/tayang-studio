@@ -8,6 +8,7 @@ vi.mock('@/lib/ipc', () => ({
   listProjects: vi.fn(),
   listMessages: vi.fn().mockResolvedValue([]),
   renderCommand: vi.fn().mockResolvedValue(null),
+  latestRenderInfo: vi.fn().mockResolvedValue({ path: "/p/renders/a.mp4", name: "a.mp4", size: 1, modifiedAt: "2026-11-16T13:30:00.000Z" }),
   mediaLatestRender: vi.fn().mockResolvedValue(null),
   mediaProbe: vi.fn().mockResolvedValue(null),
   mediaThumbnails: vi.fn().mockResolvedValue([]),
