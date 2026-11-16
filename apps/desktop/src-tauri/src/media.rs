@@ -43,7 +43,7 @@ pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
 }
 
 /// Like `run`, but kills the process and fails when it runs longer than `limit`.
-fn run_within(mut cmd: Command, what: &str, limit: std::time::Duration) -> Result<std::process::Output> {
+pub(crate) fn run_within(mut cmd: Command, what: &str, limit: std::time::Duration) -> Result<std::process::Output> {
     use std::process::Stdio;
     let mut child = cmd
         .stdin(Stdio::null())

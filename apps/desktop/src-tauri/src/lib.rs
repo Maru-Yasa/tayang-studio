@@ -9,6 +9,7 @@ pub mod commands;
 pub mod db;
 pub mod device;
 pub mod files;
+pub mod layers;
 pub mod media;
 pub mod preview;
 pub mod projects;
@@ -130,6 +131,7 @@ pub fn run() {
             commands::preview_start,
             commands::preview_stop,
             commands::preview_still,
+            commands::preview_layers,
             commands::check_tools,
             commands::claude_account,
             commands::claude_sign_in,

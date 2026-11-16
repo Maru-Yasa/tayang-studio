@@ -2180,6 +2180,16 @@ pub async fn preview_still(
     servers.still(&project_id, frame, &out).await.map(|p| path_string(&p))
 }
 
+/// The voice and subtitle layers under the Preview panel's film strip (see `layers`).
+#[tauri::command]
+pub async fn preview_layers(state: State<'_, AppState>, project_id: String) -> CmdResult<crate::layers::TimelineLayers> {
+    let folder = project_folder(&state, &project_id)?;
+    let tools = state.media.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::layers::timeline_layers(&tools, &folder))
+        .await
+        .map_err(err)
+}
+
 #[tauri::command]
 pub async fn media_thumbnails(
     state: State<'_, AppState>,
