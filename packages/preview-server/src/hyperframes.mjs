@@ -68,3 +68,17 @@ export function hyperframesEngine(folder, { workDir }) {
     async close() {},
   };
 }
+
+/** What a composition page's `<audio data-start>` becomes in the live preview. */
+export const HIDDEN_START = 'data-tayang-start';
+
+/**
+ * A composition page as the live preview serves it: each `<audio data-start>` renamed to
+ * `<audio data-tayang-start>`, so `<hyperframes-player>` leaves the sound alone and only the harness
+ * plays it (harness/audio-mirror.js). The player makes its own copy of every `audio[data-start]` and
+ * seeks it each time the picture is drawn; with the same file in both, that kept stalling the sound.
+ * The file on disk, which the renderer reads, is unchanged. `<video>` stays the player's: it shows.
+ */
+export function hideAudioFromPlayer(html) {
+  return html.replace(/<audio\b[^>]*>/gi, (tag) => tag.replace(/(\s)data-start(\s*=)/gi, `$1${HIDDEN_START}$2`));
+}

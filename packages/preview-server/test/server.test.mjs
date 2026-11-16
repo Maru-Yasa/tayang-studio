@@ -8,7 +8,7 @@ import { parseArgs, startServer } from '../src/server.mjs';
 import { confined, ignoredChange } from '../src/files.mjs';
 import { hyperframesPage, previewConfig, remotionEntry } from '../src/project.mjs';
 import { NEEDS_PACKAGES, remotionPackages } from '../src/remotion.mjs';
-import { npxPath } from '../src/hyperframes.mjs';
+import { hideAudioFromPlayer, npxPath } from '../src/hyperframes.mjs';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tayang-preview-test-')));
 const write = (dir, rel, body = '') => {
@@ -103,6 +103,14 @@ test('a Remotion project without its packages asks for them', () => {
   assert.throws(() => remotionPackages(tmp()), new RegExp(NEEDS_PACKAGES));
 });
 
+test('only <audio> data-start is hidden from the player; video and the rest stay', () => {
+  assert.equal(
+    hideAudioFromPlayer('<AUDIO class=x data-start = "1" data-duration="2"><video data-start="3"></video><div data-start="4">'),
+    '<AUDIO class=x data-tayang-start = "1" data-duration="2"><video data-start="3"></video><div data-start="4">',
+  );
+  assert.equal(hideAudioFromPlayer('<audio data-start-x="1" data-started="2">'), '<audio data-start-x="1" data-started="2">');
+});
+
 test('npx is found next to node', () => {
   assert.equal(npxPath('/usr/local/bin/node', 'darwin'), '/usr/local/bin/npx');
   assert.equal(npxPath('C:\\node\\node.exe', 'win32').endsWith('npx.cmd'), true);
@@ -129,7 +137,7 @@ function fakeEngine(folder, calls) {
 test('the server needs the token, a loopback Host and the control header for stills', async () => {
   const folder = tmp();
   write(folder, 'index.html', 'page');
-  write(folder, 'compositions/a.html', 'comp');
+  write(folder, 'compositions/a.html', '<audio id="vo" data-start="0" src="v.mp3"></audio>comp');
   const calls = [];
   const s = await startServer({ project: folder, engine: 'hyperframes' }, { makeEngine: fakeEngine(folder, calls) });
   const host = { Host: `127.0.0.1:${s.port}` };
@@ -140,7 +148,11 @@ test('the server needs the token, a loopback Host and the control header for sti
     assert.equal(page.status, 200);
     assert.equal(page.body, '<html>harness</html>');
     assert.equal(page.headers['cache-control'], 'no-store');
-    assert.equal((await request(s.port, { pathname: `/${s.token}/p/compositions/a.html`, headers: host })).body, 'comp');
+    assert.equal(
+      (await request(s.port, { pathname: `/${s.token}/p/compositions/a.html`, headers: host })).body,
+      '<audio id="vo" data-tayang-start="0" src="v.mp3"></audio>comp',
+      "a page's sound is hidden from the player",
+    );
     assert.equal((await request(s.port, { pathname: `/${s.token}/p/../../etc/passwd`, headers: host })).status, 404);
     assert.equal((await request(s.port, { pathname: `/${s.token}/compositions/a.html`, headers: host })).status, 404);
     const bridge = await request(s.port, { pathname: `/${s.token}/__tayang/bridge.js`, headers: host });

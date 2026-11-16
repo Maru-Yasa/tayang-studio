@@ -21,7 +21,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { confined, sendFile, watchProject } from './files.mjs';
 import { remotionEngine } from './remotion.mjs';
-import { hyperframesEngine } from './hyperframes.mjs';
+import { hideAudioFromPlayer, hyperframesEngine } from './hyperframes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.join(HERE, '..', 'harness', 'bridge.js');
@@ -142,6 +142,10 @@ export async function startServer({ project, engine: engineName, work }, { makeE
       if (!file) {
         res.writeHead(404).end();
         return;
+      }
+      // A HyperFrames page's sound is the harness's, not the player's.
+      if (engine.engine === 'hyperframes' && /\.html?$/i.test(file)) {
+        return html(hideAudioFromPlayer(fs.readFileSync(file, 'utf8')));
       }
       sendFile(req, res, file);
     } catch (err) {
