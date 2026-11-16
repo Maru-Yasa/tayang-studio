@@ -206,11 +206,13 @@ fn peaks_of(samples: &[i16], per: usize) -> Vec<f32> {
 }
 
 type PeaksKey = (PathBuf, SystemTime, u64);
+/// A waveform and its audio's length in seconds.
+type Peaks = (Vec<f32>, f64);
 /// Decoded waveforms by file, path and mtime and size: polling the layers doesn't decode again.
-static PEAKS: Mutex<Option<HashMap<PeaksKey, (Vec<f32>, f64)>>> = Mutex::new(None);
+static PEAKS: Mutex<Option<HashMap<PeaksKey, Peaks>>> = Mutex::new(None);
 
 /// The waveform of `file`'s audio and its length in seconds.
-fn audio_peaks(tools: &MediaTools, file: &Path) -> Option<(Vec<f32>, f64)> {
+fn audio_peaks(tools: &MediaTools, file: &Path) -> Option<Peaks> {
     let meta = std::fs::metadata(file).ok()?;
     let key = (file.to_path_buf(), meta.modified().ok()?, meta.len());
     if let Some(hit) = PEAKS.lock().ok()?.as_ref().and_then(|m| m.get(&key)) {
