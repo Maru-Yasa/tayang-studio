@@ -457,7 +457,9 @@ const AGENT_DEFS: [AgentDef; 5] = [
     ),
     (AgentId::Opencode, "OpenCode", "opencode", &["opencode", "acp"]),
     (AgentId::Gemini, "Gemini CLI", "gemini", &["gemini", "--experimental-acp"]),
-    (AgentId::Codex, "Codex", "codex", &["npx", "-y", "@zed-industries/codex-acp"]),
+    // `@latest`: OpenAI refuses every model to an outdated Codex signed in with ChatGPT, and npx
+    // would otherwise keep running the copy it cached first. (@zed-industries/codex-acp is retired.)
+    (AgentId::Codex, "Codex", "codex", &["npx", "-y", "@agentclientprotocol/codex-acp@latest"]),
     // Antigravity CLI speaks ACP itself since 1.5.0; its installer puts `agy` in ~/.local/bin.
     (AgentId::Antigravity, "Antigravity CLI", "agy", &["agy", "acp"]),
 ];
