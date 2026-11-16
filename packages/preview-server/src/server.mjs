@@ -8,7 +8,7 @@
 // Every URL starts with /<token>/ (the page token: other local pages can't guess it):
 //   /<token>/            the harness page (the Preview panel's iframe)
 //   /<token>/events      server-sent events: `reload` after a change is ready, `fail` with an error
-//   /<token>/__tayang/…  the bridge and the vendored HyperFrames player and runtime
+//   /<token>/__tayang/…  the bridge and the vendored HyperFrames player
 //   /<token>/p/…         HyperFrames: the project's files; Remotion: the bundle's files at /<token>/…
 //   POST /<token>/still?frame=N&out=<png path>  with header x-tayang-control: <control>
 //                        captures frame N exactly as a render would and writes it to `out`
@@ -21,12 +21,11 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { confined, sendFile, watchProject } from './files.mjs';
 import { remotionEngine } from './remotion.mjs';
-import { hyperframesEngine, withRuntime } from './hyperframes.mjs';
+import { hyperframesEngine } from './hyperframes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = path.join(HERE, '..', 'harness', 'bridge.js');
 const PLAYER = path.join(HERE, '..', 'vendor', 'hyperframes-player.global.js');
-const RUNTIME = path.join(HERE, '..', 'vendor', 'hyperframe.runtime.iife.js');
 
 const log = (...a) => console.error('[preview]', ...a);
 
@@ -131,7 +130,6 @@ export async function startServer({ project, engine: engineName, work }, { makeE
       }
       if (rest === '__tayang/bridge.js') return sendFile(req, res, BRIDGE);
       if (rest === '__tayang/player.js') return sendFile(req, res, PLAYER);
-      if (rest === '__tayang/runtime.js') return sendFile(req, res, RUNTIME);
       if (!engine) {
         res.writeHead(404).end();
         return;
@@ -142,10 +140,6 @@ export async function startServer({ project, engine: engineName, work }, { makeE
       if (!file) {
         res.writeHead(404).end();
         return;
-      }
-      // A HyperFrames page gets the runtime, which plays its sound.
-      if (engine.engine === 'hyperframes' && /\.html?$/i.test(file)) {
-        return html(withRuntime(fs.readFileSync(file, 'utf8'), `/${token}/__tayang/runtime.js`));
       }
       sendFile(req, res, file);
     } catch (err) {

@@ -68,21 +68,3 @@ export function hyperframesEngine(folder, { workDir }) {
     async close() {},
   };
 }
-
-/** Marks the runtime tag the way `hyperframes preview` does, so the player knows the runtime is there. */
-export const RUNTIME_ATTR = 'data-hyperframes-preview-runtime';
-
-/**
- * A composition page with the HyperFrames runtime loaded first, as `hyperframes preview` serves it.
- * Without the runtime the player still drives the GSAP timeline, so the picture moves, but nothing
- * plays the composition's `<audio>` and `<video>`: no sound.
- */
-export function withRuntime(html, src) {
-  if (html.includes(RUNTIME_ATTR) || /hyperframe[.-]runtime(\.iife)?\.js/.test(html)) return html;
-  const tag = `<script ${RUNTIME_ATTR}="1" src="${src.replace(/"/g, '&quot;')}"></script>`;
-  const head = /<head\b[^>]*>/i.exec(html);
-  if (head) return html.slice(0, head.index + head[0].length) + '\n' + tag + html.slice(head.index + head[0].length);
-  const body = /<body\b/i.exec(html);
-  if (body) return html.slice(0, body.index) + tag + '\n' + html.slice(body.index);
-  return tag + '\n' + html;
-}
