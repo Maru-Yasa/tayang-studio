@@ -132,7 +132,7 @@ describe('buildAutopilotChatPrompt', () => {
 
   it('gives the agent every option, in the language of the user, and the way to hand over', () => {
     const p = buildAutopilotChatPrompt(input);
-    for (const part of ['science: Science explained', 'Rachel: Calm narrator', 'atlas: Atlas', 'sa_1: tiktok @oyen', 'Indonesian', '$TAYANG_AI_URL/autopilot', '45, 60 or 90', 'weekdays']) {
+    for (const part of ['science: Science explained', 'Rachel: Calm narrator', 'atlas: Atlas', 'sa_1: tiktok @oyen', 'Indonesian', '$TAYANG_AI_URL/autopilot', '-H "Content-Type: application/json" --data-binary @- <<\'EOF\'', '45, 60 or 90', 'weekdays']) {
       expect(p).toContain(part);
     }
     expect(p).toMatch(/cannot start it yourself/);

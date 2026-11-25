@@ -174,7 +174,7 @@ describe('checkScheduleItems', () => {
   it("accepts the SKILL.md example as the app's own parser reads it", () => {
     const skill = readFileSync(join(__dirname, '../../../../packages/skills/agent-plugin/skills/tayang-studio/SKILL.md'), 'utf8');
     const section = skill.slice(skill.indexOf('## Scheduling videos'));
-    const body = JSON.parse(/\$TAYANG_AI_URL\/schedule.*?-d '(\{.*?\})'/.exec(section.replace('"<id>"', '"p1"'))![1]!);
+    const body = JSON.parse(/\$TAYANG_AI_URL\/schedule[\s\S]*?<<'EOF'\n(\{.*?\})\nEOF/.exec(section.replace('"<id>"', '"p1"'))![1]!);
     const checked = checkScheduleItems(body.items, [proj()], new Set(['p1']), now);
     expect('items' in checked && checked.items.map((i) => i.projectId ?? i.title)).toEqual(['p1', 'Kenapa rupiah melemah']);
   });

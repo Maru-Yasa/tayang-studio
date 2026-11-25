@@ -95,6 +95,7 @@ describe('topics', () => {
     expect(p).toContain('exactly 3');
     expect(p).toContain('AskUserQuestion');
     expect(p).toContain('$TAYANG_AI_URL/video');
+    expect(p).toContain('-H "Content-Type: application/json" --data-binary @- <<\'EOF\'');
     expect(p).toContain('lengthSec');
     expect(p).toContain('styleId');
     expect(p).toMatch(/one short, friendly sentence in Indonesian/);
