@@ -140,55 +140,145 @@ struct Request {
     body: Vec<u8>,
 }
 
-async fn read_request(s: &mut tokio::net::TcpStream) -> Option<Request> {
-    let mut buf = Vec::new();
+enum ReadError {
+    BadRequest(&'static str),
+    LengthRequired,
+}
+
+async fn read_more(s: &mut tokio::net::TcpStream, buf: &mut Vec<u8>, max_buf: usize) -> Result<(), ReadError> {
+    if buf.len() >= max_buf {
+        return Err(ReadError::BadRequest("Send a POST with a JSON body under 64 KB"));
+    }
     let mut chunk = [0u8; 4096];
+    let n = s
+        .read(&mut chunk)
+        .await
+        .ok()
+        .filter(|&n| n > 0)
+        .ok_or(ReadError::BadRequest("Send a POST with a JSON body under 64 KB"))?;
+    buf.extend_from_slice(&chunk[..n]);
+    Ok(())
+}
+
+async fn read_chunked(s: &mut tokio::net::TcpStream, buf: &mut Vec<u8>, start: usize) -> Result<Vec<u8>, ReadError> {
+    let mut pos = start;
+    let mut decoded = Vec::new();
+    let max_buf = MAX_HEAD + MAX_BODY * 2;
+    loop {
+        let line_end = loop {
+            if let Some(rel) = buf[pos..].windows(2).position(|w| w == b"\r\n") {
+                break rel;
+            }
+            read_more(s, buf, max_buf).await?;
+        };
+        let line = std::str::from_utf8(&buf[pos..pos + line_end])
+            .map_err(|_| ReadError::BadRequest("Malformed chunked request body"))?;
+        let hex = line.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(hex, 16)
+            .map_err(|_| ReadError::BadRequest("Malformed chunked request body"))?;
+        pos += line_end + 2;
+        if size == 0 {
+            let trailer_start = pos - 2;
+            while buf[trailer_start..].windows(4).position(|w| w == b"\r\n\r\n").is_none() {
+                read_more(s, buf, max_buf).await?;
+            }
+            return Ok(decoded);
+        }
+        if decoded.len().checked_add(size).is_none_or(|n| n > MAX_BODY) {
+            return Err(ReadError::BadRequest("Send a POST with a JSON body under 64 KB"));
+        }
+        while buf.len() < pos + size + 2 {
+            read_more(s, buf, max_buf).await?;
+        }
+        if &buf[pos + size..pos + size + 2] != b"\r\n" {
+            return Err(ReadError::BadRequest("Malformed chunked request body"));
+        }
+        decoded.extend_from_slice(&buf[pos..pos + size]);
+        pos += size + 2;
+    }
+}
+
+async fn read_request(s: &mut tokio::net::TcpStream) -> Result<Request, ReadError> {
+    let mut buf = Vec::new();
     let read = async {
-        loop {
+        let head_end = loop {
             if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                let head = String::from_utf8_lossy(&buf[..i]).to_string();
-                let len = head
-                    .lines()
-                    .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("content-length")).map(|(_, v)| v.trim().parse::<usize>().ok()))
-                    .flatten()
-                    .unwrap_or(0);
-                if len > MAX_BODY {
-                    return None;
-                }
-                while buf.len() < i + 4 + len {
-                    let n = s.read(&mut chunk).await.ok()?;
-                    if n == 0 {
-                        return None;
-                    }
-                    buf.extend_from_slice(&chunk[..n]);
-                }
-                let mut first = head.lines().next().unwrap_or("").split(' ');
-                let method = first.next().unwrap_or("").to_string();
-                let path = first.next().unwrap_or("").to_string();
-                let token = head.lines().find_map(|l| {
-                    let (k, v) = l.split_once(':')?;
-                    k.trim().eq_ignore_ascii_case("authorization").then(|| v.trim().strip_prefix("Bearer ").map(|t| t.trim().to_string()))?
-                });
-                return Some(Request { method, path, token, body: buf[i + 4..i + 4 + len].to_vec() });
+                break i;
             }
             if buf.len() > MAX_HEAD {
-                return None;
+                return Err(ReadError::BadRequest("Send a POST with a JSON body under 64 KB"));
             }
-            let n = s.read(&mut chunk).await.ok()?;
-            if n == 0 {
-                return None;
+            read_more(s, &mut buf, MAX_HEAD + 4096).await?;
+        };
+        let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
+        let mut first = head.lines().next().unwrap_or("").split(' ');
+        let method = first.next().unwrap_or("").to_string();
+        let path = first.next().unwrap_or("").to_string();
+        let mut content_length: Option<usize> = None;
+        let mut has_te = false;
+        let mut is_chunked = false;
+        let mut wants_continue = false;
+        let mut token: Option<String> = None;
+        for line in head.lines().skip(1) {
+            let Some((k, v)) = line.split_once(':') else { continue };
+            let name = k.trim();
+            let val = v.trim();
+            if name.eq_ignore_ascii_case("content-length") {
+                let parsed = val
+                    .parse::<usize>()
+                    .map_err(|_| ReadError::BadRequest("Invalid Content-Length"))?;
+                if parsed > MAX_BODY {
+                    return Err(ReadError::BadRequest("Send a POST with a JSON body under 64 KB"));
+                }
+                content_length = Some(parsed);
+            } else if name.eq_ignore_ascii_case("transfer-encoding") {
+                has_te = true;
+                if val.split(',').any(|p| p.trim().eq_ignore_ascii_case("chunked")) {
+                    is_chunked = true;
+                }
+            } else if name.eq_ignore_ascii_case("expect") && val.eq_ignore_ascii_case("100-continue") {
+                wants_continue = true;
+            } else if name.eq_ignore_ascii_case("authorization") && token.is_none() {
+                token = val.strip_prefix("Bearer ").map(|t| t.trim().to_string());
             }
-            buf.extend_from_slice(&chunk[..n]);
         }
+        if has_te && !is_chunked && content_length.is_none() {
+            return Err(ReadError::LengthRequired);
+        }
+        if wants_continue {
+            let _ = s.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").await;
+            let _ = s.flush().await;
+        }
+        let body = if is_chunked {
+            read_chunked(s, &mut buf, head_end + 4).await?
+        } else {
+            let len = content_length.unwrap_or(0);
+            while buf.len() < head_end + 4 + len {
+                read_more(s, &mut buf, MAX_HEAD + 4 + MAX_BODY).await?;
+            }
+            buf[head_end + 4..head_end + 4 + len].to_vec()
+        };
+        Ok(Request { method, path, token, body })
     };
-    tokio::time::timeout(std::time::Duration::from_secs(30), read).await.ok().flatten()
+    tokio::time::timeout(std::time::Duration::from_secs(30), read)
+        .await
+        .unwrap_or(Err(ReadError::BadRequest("Send a POST with a JSON body under 64 KB")))
 }
 
 async fn respond(s: &mut tokio::net::TcpStream, status: u16, body: &Value) {
     let text = body.to_string();
+    let reason = match status {
+        200 => "OK",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        411 => "Length Required",
+        _ if status < 400 => "OK",
+        _ => "Error",
+    };
     let res = format!(
-        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
-        if status < 400 { "OK" } else { "Error" },
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
         text.len()
     );
     let _ = s.write_all(res.as_bytes()).await;
@@ -199,49 +289,70 @@ fn fail(code: &str, message: &str) -> Value {
     json!({ "error": code, "message": message })
 }
 
+fn parse_json_object(raw: &[u8]) -> Result<Value, String> {
+    let trimmed = raw.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(raw);
+    if trimmed.iter().all(u8::is_ascii_whitespace) {
+        return Err("Request body is empty; send a JSON object".into());
+    }
+    let val: Value = serde_json::from_slice(trimmed).map_err(|e| format!("Invalid JSON body: {e}"))?;
+    match val {
+        Value::Object(_) => Ok(val),
+        Value::String(inner) => match serde_json::from_str::<Value>(&inner) {
+            Ok(v @ Value::Object(_)) => Ok(v),
+            Ok(_) => Err("The body must be a JSON object".into()),
+            Err(e) => Err(format!("The body must be a JSON object, not a JSON string ({e})")),
+        },
+        _ => Err("The body must be a JSON object".into()),
+    }
+}
+
 async fn serve(mut s: tokio::net::TcpStream, proxy: &AiProxy, folder_for: &(dyn Fn(&str) -> Option<PathBuf> + Send + Sync), run: &Runner, act: &Actor) {
-    let Some(req) = read_request(&mut s).await else {
-        return respond(&mut s, 400, &fail("invalid", "Send a POST with a JSON body under 64 KB")).await;
+    let req = match read_request(&mut s).await {
+        Ok(r) => r,
+        Err(ReadError::LengthRequired) => {
+            return respond(&mut s, 411, &fail("invalid", "Content-Length or Transfer-Encoding: chunked is required")).await;
+        }
+        Err(ReadError::BadRequest(msg)) => {
+            return respond(&mut s, 400, &fail("invalid", msg)).await;
+        }
     };
     let Some(chat) = req.token.as_deref().and_then(|t| proxy.chat_for(t)) else {
         return respond(&mut s, 401, &fail("unauthorized", "Use the TAYANG_AI_TOKEN this session was given")).await;
     };
-    // /video and /schedule: Tayang asks the user; the agent's turn should end there.
-    if req.method == "POST" {
-        if let Ok(body @ Value::Object(_)) = serde_json::from_slice::<Value>(&req.body) {
-            match parse_action(&req.path, &body) {
-                Some(Ok((name, context))) => {
-                    act(&chat, name, context);
-                    let message = if name == "pick_topic" {
-                        "Tayang is starting this video in its own chat. End your turn now: the video is made there."
-                    } else if name == "start_autopilot_chat" {
-                        "Tayang is opening its autopilot setup chat with what the user said. End your turn now; the autopilot is set up there."
-                    } else if name == "create_autopilot" {
-                        "Tayang is showing the user this autopilot to check and start. End your turn now; never say it is running until the user starts it."
-                    } else {
-                        "Tayang is showing the user these times to confirm. End your turn now; never say they are scheduled until the user confirms."
-                    };
-                    return respond(&mut s, 200, &json!({ "ok": true, "message": message })).await;
-                }
-                Some(Err(m)) => return respond(&mut s, 400, &fail("invalid", &m)).await,
-                None => {}
-            }
-        }
-    }
     let usage = req.path.split('?').next().unwrap_or("").trim_end_matches('/') == "/usage";
     if req.method != if usage { "GET" } else { "POST" } {
         return respond(&mut s, 405, &fail("invalid", if usage { "Use GET" } else { "Use POST" })).await;
     }
-    let Some(folder) = folder_for(&chat) else {
-        return respond(&mut s, 404, &fail("not-found", "This chat has no folder to save into")).await;
-    };
     let body: Value = if usage {
         json!({})
     } else {
-        match serde_json::from_slice(&req.body) {
-            Ok(v @ Value::Object(_)) => v,
-            _ => return respond(&mut s, 400, &fail("invalid", "The body must be a JSON object")).await,
+        match parse_json_object(&req.body) {
+            Ok(v) => v,
+            Err(m) => return respond(&mut s, 400, &fail("invalid", &m)).await,
         }
+    };
+    // /video and /schedule: Tayang asks the user; the agent's turn should end there.
+    if req.method == "POST" {
+        match parse_action(&req.path, &body) {
+            Some(Ok((name, context))) => {
+                act(&chat, name, context);
+                let message = if name == "pick_topic" {
+                    "Tayang is starting this video in its own chat. End your turn now: the video is made there."
+                } else if name == "start_autopilot_chat" {
+                    "Tayang is opening its autopilot setup chat with what the user said. End your turn now; the autopilot is set up there."
+                } else if name == "create_autopilot" {
+                    "Tayang is showing the user this autopilot to check and start. End your turn now; never say it is running until the user starts it."
+                } else {
+                    "Tayang is showing the user these times to confirm. End your turn now; never say they are scheduled until the user confirms."
+                };
+                return respond(&mut s, 200, &json!({ "ok": true, "message": message })).await;
+            }
+            Some(Err(m)) => return respond(&mut s, 400, &fail("invalid", &m)).await,
+            None => {}
+        }
+    }
+    let Some(folder) = folder_for(&chat) else {
+        return respond(&mut s, 404, &fail("not-found", "This chat has no folder to save into")).await;
     };
     let job = match parse_job(&req.path, &body) {
         Ok(j) => j,
@@ -505,5 +616,93 @@ mod tests {
         assert_eq!((s["imagesAffordable"].as_i64(), s["voiceMinutesAffordable"].as_i64()), (Some(28), Some(4)));
         let none = usage_summary(&json!({ "credits": { "remaining": 0 }, "posts": { "remaining": 0 } }));
         assert!(none["message"].as_str().unwrap().contains("without AI"));
+    }
+
+    async fn raw_request(port: u16, raw: &[u8]) -> (u16, Value) {
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        s.write_all(raw).await.unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).await.unwrap();
+        let status = out.split(' ').nth(1).unwrap().parse().unwrap();
+        let body = out.split("\r\n\r\n").nth(1).unwrap_or("null");
+        (status, serde_json::from_str(body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn json_body_errors_are_explicit_and_double_encoded_json_is_unwrapped() {
+        let run: Runner = Arc::new(|_, _| Box::pin(async { Ok(json!({ "files": [] })) }));
+        let acted: Arc<Mutex<Vec<(String, String, Value)>>> = Arc::default();
+        let rec = acted.clone();
+        let act: Actor = Arc::new(move |chat, name, ctx| rec.lock().unwrap().push((chat.into(), name.into(), ctx)));
+        let proxy = start(Arc::new(|_| None), run, act).await.unwrap();
+        let token = proxy.session_env("c1")[1].1.clone();
+
+        let (status, body) = post(proxy.port, "/video", Some(&token), "").await;
+        assert_eq!(status, 400);
+        assert!(body["message"].as_str().unwrap().contains("empty"), "{body}");
+
+        let (status, body) = post(proxy.port, "/video", Some(&token), "{title:bad}").await;
+        assert_eq!(status, 400);
+        assert!(body["message"].as_str().unwrap().starts_with("Invalid JSON body:"), "{body}");
+
+        let (status, body) = post(proxy.port, "/video", Some(&token), "[1, 2]").await;
+        assert_eq!((status, body["message"].as_str()), (400, Some("The body must be a JSON object")));
+
+        let (status, body) = post(proxy.port, "/video", Some(&token), r#""hello""#).await;
+        assert_eq!(status, 400);
+        assert!(body["message"].as_str().unwrap().contains("JSON string"), "{body}");
+
+        // Double-encoded JSON object string is unwrapped and accepted even without a chat folder.
+        let double = serde_json::to_string(r#"{"title":"My video","kind":"explainer"}"#).unwrap();
+        let (status, _) = post(proxy.port, "/video", Some(&token), &double).await;
+        assert_eq!(status, 200);
+        assert_eq!(acted.lock().unwrap()[0].2["title"], "My video");
+    }
+
+    #[tokio::test]
+    async fn supports_chunked_encoding_100_continue_and_rejects_unknown_transfer_encoding() {
+        let acted: Arc<Mutex<Vec<(String, String, Value)>>> = Arc::default();
+        let rec = acted.clone();
+        let run: Runner = Arc::new(|_, _| Box::pin(async { Ok(json!({ "ok": true })) }));
+        let act: Actor = Arc::new(move |chat, name, ctx| rec.lock().unwrap().push((chat.into(), name.into(), ctx)));
+        let proxy = start(Arc::new(|_| Some(PathBuf::from("/p/c1"))), run, act).await.unwrap();
+        let token = proxy.session_env("c1")[1].1.clone();
+
+        // Chunked request across multiple chunks.
+        let part1 = br#"{"title":"Chunked "#;
+        let part2 = br#"video","kind":"explainer"}"#;
+        let chunked = format!(
+            "POST /video HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nTransfer-Encoding: chunked\r\nContent-Type: application/json\r\n\r\n{:x}\r\n{}\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+            part1.len(),
+            std::str::from_utf8(part1).unwrap(),
+            part2.len(),
+            std::str::from_utf8(part2).unwrap(),
+        );
+        let (status, _) = raw_request(proxy.port, chunked.as_bytes()).await;
+        assert_eq!(status, 200);
+        assert_eq!(acted.lock().unwrap()[0].2["title"], "Chunked video");
+
+        // Unsupported Transfer-Encoding without Content-Length returns 411.
+        let bad_te = format!(
+            "POST /video HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nTransfer-Encoding: gzip\r\n\r\n"
+        );
+        assert_eq!(raw_request(proxy.port, bad_te.as_bytes()).await.0, 411);
+
+        // Expect: 100-continue gets an interim 100 Continue before the client sends the body.
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", proxy.port)).await.unwrap();
+        let payload = r#"{"title":"Continued video"}"#;
+        let head = format!(
+            "POST /video HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nExpect: 100-continue\r\n\r\n",
+            payload.len()
+        );
+        s.write_all(head.as_bytes()).await.unwrap();
+        let mut interim = [0u8; 64];
+        let n = s.read(&mut interim).await.unwrap();
+        assert!(std::str::from_utf8(&interim[..n]).unwrap().starts_with("HTTP/1.1 100 Continue\r\n\r\n"));
+        s.write_all(payload.as_bytes()).await.unwrap();
+        let mut rest = String::new();
+        s.read_to_string(&mut rest).await.unwrap();
+        assert!(rest.starts_with("HTTP/1.1 200 OK\r\n"), "{rest}");
+        assert_eq!(acted.lock().unwrap()[1].2["title"], "Continued video");
     }
 }

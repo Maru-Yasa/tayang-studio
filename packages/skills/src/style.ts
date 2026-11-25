@@ -35,8 +35,11 @@ export const MOTION_RULES = [
 export const FACTS_RULE = '- Facts must be real and checkable. No made-up numbers.';
 
 /** How the agent starts a picked video: Tayang's local endpoint (see the desktop's ai_proxy.rs). */
-export const VIDEO_CALL =
-  `curl -s -X POST "$TAYANG_AI_URL/video" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -d '{"title":"<the idea title>","kind":"<kind>","lengthSec":<seconds>,"styleId":"<style id or empty>","notes":"<or empty>"}'`;
+export const VIDEO_CALL = [
+  'curl -s -X POST "$TAYANG_AI_URL/video" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -H "Content-Type: application/json" --data-binary @- <<\'EOF\'',
+  '{"title":"<the idea title>","kind":"<kind>","lengthSec":<seconds>,"styleId":"<style id or empty>","notes":"<or empty>"}',
+  'EOF',
+].join('\n');
 
 export function buildTopicIdeasPrompt(
   kinds: VideoKind[],
@@ -58,7 +61,9 @@ export function buildTopicIdeasPrompt(
     `1. Start with one short, friendly sentence in ${lang}, as normal text.`,
     '2. Then ask the user to pick one with your tool for asking the user (Claude Code: AskUserQuestion; opencode: question; Codex: request_user_input): one question, one option per idea, the title as the option and one line on why it works as a motion video as its description. Without such a tool, list the 3 ideas numbered and ask the user to reply with a number.',
     '3. When the user picks one (or writes their own), start it, then end your turn: Tayang makes the video in a new chat.',
-    `   ${VIDEO_CALL}`,
+    '   ```sh',
+    ...VIDEO_CALL.split('\n').map((l) => `   ${l}`),
+    '   ```',
     '   `notes`: only what the user said that the title does not say, in their words; never your own choices; or empty.',
     '4. Never write JSON or markup for the choice.',
   ].join('\n');

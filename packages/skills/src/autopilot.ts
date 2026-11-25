@@ -132,7 +132,11 @@ export function buildAutopilotChatPrompt({ niches, voices, styles, accounts, lan
     ...list(accounts.map((a) => `${a.id}: ${a.platform}${a.username ? ` @${a.username}` : ''}`)),
     '',
     'When you have everything, send it. Tayang shows the user the result to check and start; you cannot start it yourself:',
-    `curl -s -X POST "$TAYANG_AI_URL/autopilot" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -d '{"name":"...","nicheId":"...","styleId":"...","voiceId":"...","language":"id","lengthSec":60,"days":"everyday","times":["09:00"],"review":true,"socialAccountIds":[]}'`,
+    '```sh',
+    'curl -s -X POST "$TAYANG_AI_URL/autopilot" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -H "Content-Type: application/json" --data-binary @- <<\'EOF\'',
+    '{"name":"...","nicheId":"...","styleId":"...","voiceId":"...","language":"id","lengthSec":60,"days":"everyday","times":["09:00"],"review":true,"socialAccountIds":[]}',
+    'EOF',
+    '```',
     'Then end your turn.',
   ].join('\n');
 }

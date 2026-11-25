@@ -74,8 +74,9 @@ describe('agent plugin', () => {
     const t = read('skills/tayang-studio/SKILL.md');
     expect(t).toContain('## Scheduling videos');
     expect(t).toContain('Never say a video is scheduled until the user has confirmed it');
+    expect(t).toContain('-H "Content-Type: application/json" --data-binary @- <<\'EOF\'');
     // The example request is valid: its JSON parses and every time has an offset.
-    const call = /\$TAYANG_AI_URL\/schedule.*?-d '(\{.*?\})'/.exec(t.slice(t.indexOf('## Scheduling videos')))![1]!;
+    const call = /\$TAYANG_AI_URL\/schedule[\s\S]*?<<'EOF'\n(\{.*?\})\nEOF/.exec(t.slice(t.indexOf('## Scheduling videos')))![1]!;
     const body = JSON.parse(call);
     expect(body.items.length).toBeGreaterThan(0);
     for (const item of body.items) expect(item.at).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/);

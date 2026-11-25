@@ -20,7 +20,15 @@ Tayang Studio is a desktop app that turns a topic into a short motion video. You
 - Good topics: explainers, "why" and "how" questions, data and comparisons, history and geography, science what-ifs, product or promo messages told with type and illustration.
 - Pick topics that fit one of the installed styles (Atlas journey for places, routes, borders and trade; Cartoon 3D world for short true stories; Cartoon 3D what-if for "What if you…" escalations) or a plain kinetic-type explainer.
 - Facts must be real and checkable. No made-up numbers.
-- When you suggest topics: start with one short, friendly sentence in the user's video language. Then ask the user to pick one with your tool for asking the user (Claude Code: AskUserQuestion; opencode: question; Codex: request_user_input): one question, one option per idea, the idea's title as the option and one line on why it works as a motion video as its description. Without such a tool, list the ideas numbered and ask the user to reply with a number. When the user picks one (or writes their own), start it with `curl -s -X POST "$TAYANG_AI_URL/video" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -d '{"title":"<the idea title>","kind":"<kind>","lengthSec":<seconds>,"styleId":"<style id or empty>","notes":"<only what the user said that the title does not say, or empty>"}'`, then end your turn: Tayang makes the video in a new chat. Put in `notes` only what the user said in this chat that the title doesn't say, in their words (a fact to include, the tone, something to leave out); the new chat only sees what you send, so anything left out is lost. Never put your own choices or limits there (credits, length, voice): it reads as the user's request. Leave it empty when the user said nothing more. For `styleId`, use the exact Tayang style id you were given (the user's mentioned style says "Its Tayang style id is …"); never invent one from the style's name. If the user mentioned a style, every idea uses that style's id.
+- When you suggest topics: start with one short, friendly sentence in the user's video language. Then ask the user to pick one with your tool for asking the user (Claude Code: AskUserQuestion; opencode: question; Codex: request_user_input): one question, one option per idea, the idea's title as the option and one line on why it works as a motion video as its description. Without such a tool, list the ideas numbered and ask the user to reply with a number. When the user picks one (or writes their own), start it and end your turn (Tayang makes the video in a new chat):
+
+  ```sh
+  curl -s -X POST "$TAYANG_AI_URL/video" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -H "Content-Type: application/json" --data-binary @- <<'EOF'
+  {"title":"<the idea title>","kind":"<kind>","lengthSec":<seconds>,"styleId":"<style id or empty>","notes":"<only what the user said that the title does not say, or empty>"}
+  EOF
+  ```
+
+  Put in `notes` only what the user said in this chat that the title doesn't say, in their words (a fact to include, the tone, something to leave out); the new chat only sees what you send, so anything left out is lost. Never put your own choices or limits there (credits, length, voice): it reads as the user's request. Leave it empty when the user said nothing more. For `styleId`, use the exact Tayang style id you were given (the user's mentioned style says "Its Tayang style id is …"); never invent one from the style's name. If the user mentioned a style, every idea uses that style's id.
 
 ## A new video always starts as a Tayang video
 
@@ -62,8 +70,21 @@ Tayang makes AI images and voice-overs with the user's Tayang credits. Every ses
 
 The two calls:
 
-- Image (1 credit each): `curl -s -X POST "$TAYANG_AI_URL/image" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -d '{"prompt":"<what to draw, in English>","aspect":"9:16","out":"assets/<name>.jpg"}'`. `aspect` is 9:16, 16:9 or 1:1; `"count"` makes up to 4 (`<name>-2.jpg`…).
-- Voice (about 7 credits a minute): `curl -s -X POST "$TAYANG_AI_URL/voice" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -d '{"text":"<the narration>","language":"id","out":"audio/<name>.mp3"}'`.
+- Image (1 credit each, `aspect` is 9:16, 16:9 or 1:1; `"count"` makes up to 4 as `<name>-2.jpg`…):
+
+  ```sh
+  curl -s -X POST "$TAYANG_AI_URL/image" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -H "Content-Type: application/json" --data-binary @- <<'EOF'
+  {"prompt":"<what to draw, in English>","aspect":"9:16","out":"assets/<name>.jpg"}
+  EOF
+  ```
+
+- Voice (about 7 credits a minute):
+
+  ```sh
+  curl -s -X POST "$TAYANG_AI_URL/voice" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -H "Content-Type: application/json" --data-binary @- <<'EOF'
+  {"text":"<the narration>","language":"id","out":"audio/<name>.mp3"}
+  EOF
+  ```
 
 The answer lists the saved files (inside your folder) and `creditsLeft`. If it is an error (`signed-out`, `plan-required`, `quota-exceeded`), finish the video without that asset and say so once, in one short line.
 
@@ -80,7 +101,11 @@ Before you say a video is done, unless the project brief or the message says to 
 
 An autopilot makes new videos by itself on a schedule (every day, on weekdays…) and can post them. When the user asks for one, or for videos that keep coming without asking each time, never plan or schedule the videos yourself: start Tayang's autopilot setup, which knows the niches, styles, voices and accounts to pick from:
 
-`curl -s -X POST "$TAYANG_AI_URL/autopilot-chat" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -d '{"notes":"<what the user asked for, in their words: topic, account, how often>"}'`
+```sh
+curl -s -X POST "$TAYANG_AI_URL/autopilot-chat" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -H "Content-Type: application/json" --data-binary @- <<'EOF'
+{"notes":"<what the user asked for, in their words: topic, account, how often>"}
+EOF
+```
 
 Say in one short line that the setup opens in a new chat, then end your turn.
 
@@ -88,7 +113,11 @@ Say in one short line that the setup opens in a new chat, then end your turn.
 
 When the user asks you to plan, schedule or put videos on the calendar, say the plan in one short line, then ask Tayang to schedule it. Tayang shows the user its own confirmation and schedules only what they confirm; you can't schedule anything yourself.
 
-`curl -s -X POST "$TAYANG_AI_URL/schedule" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -d '{"items":[{"projectId":"<id>","title":"Jalur Rempah","at":"2026-11-05T19:00:00+07:00"},{"title":"Kenapa rupiah melemah","at":"2026-11-07T12:00:00+07:00","kind":"explainer"}]}'`
+```sh
+curl -s -X POST "$TAYANG_AI_URL/schedule" -H "Authorization: Bearer $TAYANG_AI_TOKEN" -H "Content-Type: application/json" --data-binary @- <<'EOF'
+{"items":[{"projectId":"<id>","title":"Jalur Rempah","at":"2026-11-05T19:00:00+07:00"},{"title":"Kenapa rupiah melemah","at":"2026-11-07T12:00:00+07:00","kind":"explainer"}]}
+EOF
+```
 
 - 1 to 20 items. Each item: `"title"`, `"at"` (RFC 3339 in the user's local time zone, with its offset, such as `2026-11-05T19:00:00+07:00`), and `"projectId"` only for a video whose Tayang id you were given (this project chat's video, or a video mentioned in this chat); Tayang refuses any other id. An item without `projectId` becomes a new draft video with that title, so never use it for a video that already exists. `"kind"` is optional (explainer, promo, quote, news, tutorial, data, event).
 - Times must be in the future and within a year. Use the time zone you were given, with the offset that zone has on each date (daylight saving can change it), and count from the time you were given at the start of the chat.
