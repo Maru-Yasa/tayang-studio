@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentUpdate, PermissionRequest, Settings, Style } from '@tayang/shared';
+import type { AgentUpdate, PermissionRequest, Project, Settings, Style } from '@tayang/shared';
 
 vi.mock('@/lib/autopilotChat', () => ({ startAutopilotChat: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@/lib/ipc', () => ({
@@ -31,6 +31,13 @@ vi.mock('@/lib/ipc', () => ({
   installStyleTemplate: vi.fn(),
   setProjectStatus: vi.fn().mockResolvedValue({ id: 'p1', status: 'building' }),
   writeBrief: vi.fn().mockResolvedValue(undefined),
+  copyChatAttachments: vi.fn(async () => []),
+  getChat: vi.fn().mockResolvedValue(null),
+  updateChatAgent: vi.fn(),
+  renderCommand: vi.fn().mockResolvedValue(null),
+  mediaLatestRender: vi.fn().mockResolvedValue(null),
+  latestRenderInfo: vi.fn().mockResolvedValue(null),
+  mediaProbe: vi.fn().mockResolvedValue(null),
   detectAgents: vi.fn().mockResolvedValue([]),
   assetUrl: (p: string) => p,
 }));
@@ -502,5 +509,146 @@ describe('topic ideas in a new chat', () => {
     await userEvent.click(screen.getByRole('button', { name: /Ide JSON/ }));
     await waitFor(() => expect(ipc.createProject).toHaveBeenCalled());
     expect(vi.mocked(ipc.createProject).mock.calls[0]![0]).toMatchObject({ title: 'Ide JSON', kind: 'promo' });
+  });
+});
+
+describe('carrying attachments, @mentions, and composed prompts across POST /video', () => {
+  it('copies attached files, keeps the composed prompt/brief, writes AGENTS.md brief, and skips writeScript', async () => {
+    const srcDoc = {
+      type: 'file' as const,
+      path: '/w/Tayang/.tayang/chats/chat-src/attachments/script.txt',
+      name: 'script.txt',
+      mime: 'text/plain',
+      size: 120,
+    };
+    const copiedDoc = {
+      type: 'file' as const,
+      path: '/w/Tayang/sejarah-majapahit/attachments/script.txt',
+      name: 'script.txt',
+      mime: 'text/plain',
+      size: 120,
+    };
+    const refProject: Project = {
+      id: 'p-ref',
+      title: 'Intro Video',
+      slug: 'intro-video',
+      folder: '/w/Tayang/intro-video',
+      kind: 'explainer',
+      format: '9:16',
+      language: 'id',
+      status: 'rendered',
+      styleId: null,
+      scheduledAt: null,
+      reviewState: 'none',
+      postedAt: null,
+      remindedAt: null,
+      reviewRemindedAt: null,
+      durationSec: 20,
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    vi.mocked(ipc.listProjects).mockResolvedValue([refProject]);
+    vi.mocked(ipc.createChat).mockResolvedValueOnce({
+      id: 'chat-proj',
+      projectId: 'p1',
+      agentId: 'claude',
+      title: 'Sejarah Majapahit',
+      createdAt: '',
+    } as never);
+    vi.mocked(ipc.createProject).mockResolvedValue({
+      id: 'p1',
+      title: 'Sejarah Majapahit',
+      folder: '/w/Tayang/sejarah-majapahit',
+    } as never);
+    vi.mocked(ipc.copyChatAttachments).mockResolvedValue([copiedDoc]);
+
+    // User opens a solo chat, attaches a file, mentions a video, and composes a full prompt/script.
+    useApp.setState({ route: { name: 'chat', chatId: 'chat-src' } });
+    useChat.getState().rememberChat({ id: 'chat-src', projectId: null, agentId: 'claude', title: 'Draft', createdAt: '' });
+    await useChat.getState().send('chat-src', [
+      srcDoc,
+      { type: 'mention', projectId: 'p-ref', title: 'Intro Video' },
+      { type: 'text', text: 'Buat video sejarah Majapahit pakai script ini: Scene 1 intro kerajaan, Scene 2 Sumpah Palapa.' },
+    ]);
+    vi.mocked(ipc.agentPrompt).mockClear();
+
+    render(<ChatRoute />);
+    await screen.findByText('Draft');
+
+    await act(async () => {
+      for (const h of updateHandlers) h({ chatId: 'chat-src', update: { kind: 'text', text: 'Oke, mulai produksi sekarang.' } });
+      for (const f of actionHandlers) {
+        f({
+          chatId: 'chat-src',
+          name: 'pick_topic',
+          context: {
+            title: 'Sejarah Majapahit',
+            kind: 'explainer',
+            lengthSec: 45,
+            hasScript: true,
+            notes: 'Scene 1 intro kerajaan, Scene 2 Sumpah Palapa.',
+          },
+        });
+      }
+      for (const h of updateHandlers) h({ chatId: 'chat-src', update: { kind: 'done', stopReason: 'end_turn' } });
+    });
+
+    await waitFor(() => expect(ipc.createProject).toHaveBeenCalled());
+    await waitFor(() => expect(useApp.getState().route).toEqual({ name: 'chat', chatId: 'chat-proj' }));
+    await waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+
+    expect(ipc.copyChatAttachments).toHaveBeenCalledWith('chat-src', {
+      projectId: 'p1',
+      files: [srcDoc],
+    });
+    expect(ipc.writeBrief).toHaveBeenCalledWith(
+      'p1',
+      expect.stringContaining('Attached files (already in this folder):\n- attachments/script.txt'),
+    );
+    expect(vi.mocked(ipc.writeBrief).mock.calls[0]![1]).toContain('Scene 1 intro kerajaan, Scene 2 Sumpah Palapa.');
+
+    const sentToProject = vi.mocked(ipc.agentPrompt).mock.calls[0]![1];
+    const sentJson = JSON.stringify(sentToProject);
+    expect(sentToProject).toContainEqual(copiedDoc);
+    expect(sentToProject).toContainEqual({ type: 'mention', projectId: 'p-ref', title: 'Intro Video' });
+    expect(sentJson).toContain('Buat video sejarah Majapahit pakai script ini');
+    expect(sentJson).toContain('Its project folder is /w/Tayang/intro-video');
+    expect(sentJson).not.toContain('Write the script for');
+    expect(sentJson).not.toContain('Tulis skrip untuk');
+    expect(useChat.getState().attachments['chat-src']).toEqual([]);
+  });
+
+  it('preserves unsent attachments and files attached before POST /video or POST /autopilot-chat', async () => {
+    const { startAutopilotChat } = await import('@/lib/autopilotChat');
+    const unsentLogo = {
+      type: 'file' as const,
+      path: '/w/Tayang/.tayang/chats/chat-1/attachments/logo.png',
+      name: 'logo.png',
+      mime: 'image/png',
+      size: 64,
+    };
+
+    render(<ChatRoute />);
+    await userEvent.click(screen.getByRole('button', { name: /From a topic/ }));
+    await waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+
+    // Simulate user attaching a file right before the agent calls POST /autopilot-chat.
+    act(() => useChat.getState().attach('chat-1', unsentLogo));
+    await act(async () => {
+      emit({ kind: 'text', text: 'Siap, kita buat autopilot.' });
+      for (const f of actionHandlers) {
+        f({ chatId: 'chat-1', name: 'start_autopilot_chat', context: { notes: 'pakai logo ini' } });
+      }
+      emit({ kind: 'done', stopReason: 'end_turn' });
+    });
+
+    await waitFor(() =>
+      expect(startAutopilotChat).toHaveBeenCalledWith(
+        expect.objectContaining({ defaultAgent: settings.defaultAgent }),
+        'pakai logo ini',
+        { sourceChatId: 'chat-1', files: [unsentLogo] },
+      ),
+    );
   });
 });

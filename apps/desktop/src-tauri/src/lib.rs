@@ -194,6 +194,7 @@ pub fn run() {
             commands::delete_job,
             commands::set_jobs_archived,
             commands::attach_file,
+            commands::copy_chat_attachments,
             commands::agent_start,
             commands::agent_prompt,
             commands::agent_set_auto,

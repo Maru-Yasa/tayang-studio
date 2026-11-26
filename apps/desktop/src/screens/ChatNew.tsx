@@ -26,7 +26,7 @@ export function ChatNew() {
   // The template the user picked on the Style screen; it goes with the chat until a topic starts a project.
   const [styleId, setStyleId] = useState<string | null>(routeStyleId);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [mention, setMention] = useState<MentionRef | null>(null);
+  const [mention, setMention] = useState<MentionRef | null>(() => useChat.getState().drafts[NEW_CHAT_DRAFT]?.mention ?? null);
   const [signal, setSignal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const creating = useRef<Promise<string> | null>(null);
@@ -139,10 +139,11 @@ export function ChatNew() {
     }
   };
 
-  /** Attaching a file makes the chat: the typed text goes along, unsent. */
+  /** Attaching a file makes the chat: the typed text, style chip, and @video mention go along, unsent. */
   const ensureForAttach = async () => {
     const id = await ensureChat(t('chat.newChat'));
-    openChat(id, templateFor(), useChat.getState().drafts[NEW_CHAT_DRAFT]);
+    const cur = useChat.getState().drafts[NEW_CHAT_DRAFT];
+    openChat(id, templateFor(), { text: cur?.text ?? '', style: cur?.style ?? null, mention: mention ?? cur?.mention ?? null });
     return id;
   };
 

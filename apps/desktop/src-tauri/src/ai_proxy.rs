@@ -77,13 +77,16 @@ pub fn parse_action(path: &str, b: &Value) -> Option<Result<(&'static str, Value
                 return Err("title must be 120 characters or fewer".into());
             }
             let mut ctx = json!({ "title": title });
-            for k in ["kind", "styleId", "notes"] {
+            for (k, max) in [("kind", 600usize), ("styleId", 600), ("notes", 16_000)] {
                 if let Some(v) = text(k) {
-                    ctx[k] = json!(v.chars().take(600).collect::<String>());
+                    ctx[k] = json!(v.chars().take(max).collect::<String>());
                 }
             }
             if let Some(n) = b.get("lengthSec").and_then(Value::as_f64) {
                 ctx["lengthSec"] = json!(n);
+            }
+            if let Some(has_script) = b.get("hasScript").and_then(Value::as_bool) {
+                ctx["hasScript"] = json!(has_script);
             }
             Ok(("pick_topic", ctx))
         })()),
@@ -106,7 +109,7 @@ pub fn parse_action(path: &str, b: &Value) -> Option<Result<(&'static str, Value
         // voices and accounts to pick from. `notes` is what the user already said.
         "/autopilot-chat" => Some(Ok((
             "start_autopilot_chat",
-            json!({ "notes": text("notes").map(|n| n.chars().take(600).collect::<String>()).unwrap_or_default() }),
+            json!({ "notes": text("notes").map(|n| n.chars().take(16_000).collect::<String>()).unwrap_or_default() }),
         ))),
         _ => None,
     }
@@ -424,6 +427,19 @@ mod tests {
         assert_eq!((name, ctx), ("start_autopilot_chat", json!({ "notes": "sejarah dunia, Instagram" })));
         assert_eq!(parse_action("/autopilot-chat", &json!({})).unwrap().unwrap().1, json!({ "notes": "" }));
         assert!(parse_action("/autopilot", &json!({ "name": "Kopi", "niche": "x".repeat(9000) })).unwrap().is_err());
+        let long_script = "a".repeat(2500);
+        let (vname, vctx) = parse_action(
+            "/video",
+            &json!({ "title": "My Video", "notes": long_script, "hasScript": true }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(vname, "pick_topic");
+        assert_eq!(vctx["notes"].as_str().map(str::len), Some(2500));
+        assert_eq!(vctx["hasScript"].as_bool(), Some(true));
+        let (ac_name, ac_ctx) = parse_action("/autopilot-chat", &json!({ "notes": long_script })).unwrap().unwrap();
+        assert_eq!(ac_name, "start_autopilot_chat");
+        assert_eq!(ac_ctx["notes"].as_str().map(str::len), Some(2500));
         assert!(parse_job("/video", &json!({})).is_err());
         assert_eq!(nth_path(Path::new("a/b.jpg"), 0), PathBuf::from("a/b.jpg"));
         assert_eq!(nth_path(Path::new("a/b.jpg"), 2), PathBuf::from("a/b-3.jpg"));

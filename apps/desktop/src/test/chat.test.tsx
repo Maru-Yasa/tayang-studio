@@ -37,6 +37,7 @@ vi.mock('@/lib/ipc', () => ({
   upsertJob: vi.fn().mockResolvedValue(undefined),
   listJobs: vi.fn().mockResolvedValue([]),
   attachFile: vi.fn(),
+  copyChatAttachments: vi.fn(async () => []),
   detectAgents: vi.fn(),
   updateChatAgent: vi.fn(),
   installStyleTemplate: vi.fn(),
@@ -1212,6 +1213,57 @@ describe('Composer attachments', () => {
     expect(box.className).toContain('border-0');
     expect(box.className).toContain('focus-visible:ring-0');
     expect(box.className).toContain('focus-visible:border-transparent');
+  });
+
+  it('preserves a @video mention on ChatNew when attaching a file moves to ChatThread', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openDialog).mockResolvedValue(['/Users/me/brief.pdf']);
+    vi.mocked(ipc.attachFile).mockResolvedValue(doc);
+    render(<ChatRoute />);
+    const box = await screen.findByRole('textbox', { name: 'Message' });
+    await user.type(box, 'remix @');
+    await screen.findByRole('listbox');
+    await user.keyboard('{Enter}');
+    expect(screen.getByText('@Kenapa rupiah melemah?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Attach files' }));
+    await waitFor(() => expect(useApp.getState().route).toMatchObject({ name: 'chat', chatId: 'c-new' }));
+    expect(await screen.findByText('brief.pdf')).toBeInTheDocument();
+    expect(screen.getByText('@Kenapa rupiah melemah?')).toBeInTheDocument();
+    expect(useChat.getState().drafts['c-new']?.mention).toMatchObject({ projectId: 'p1', title: 'Kenapa rupiah melemah?' });
+  });
+
+  it('waits for an in-flight attachment before sending across ChatNew -> ChatThread', async () => {
+    const user = userEvent.setup();
+    let resolveAttach!: (part: typeof doc) => void;
+    vi.mocked(openDialog).mockResolvedValue(['/Users/me/brief.pdf']);
+    vi.mocked(ipc.attachFile).mockReturnValue(new Promise((r) => (resolveAttach = r)));
+    render(<ChatRoute />);
+    await user.type(await screen.findByRole('textbox', { name: 'Message' }), 'go now');
+    await user.click(screen.getByRole('button', { name: 'Attach files' }));
+    await waitFor(() => expect(useApp.getState().route).toMatchObject({ name: 'chat', chatId: 'c-new' }));
+    expect(await screen.findByText('Attaching…')).toBeInTheDocument();
+
+    // User clicks Send immediately while attachFile is still copying.
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(ipc.agentPrompt).not.toHaveBeenCalled();
+
+    await act(async () => resolveAttach(doc));
+    await waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalledTimes(1));
+    expect(noFacts(vi.mocked(ipc.agentPrompt).mock.calls[0]![1])).toEqual([doc, { type: 'text', text: 'go now' }]);
+  });
+
+  it('shows the attach error in ChatThread when attachFile rejects after ChatNew navigates', async () => {
+    const user = userEvent.setup();
+    let rejectAttach!: (err: unknown) => void;
+    vi.mocked(openDialog).mockResolvedValue(['/Users/me/big.mov']);
+    vi.mocked(ipc.attachFile).mockReturnValue(new Promise((_, rej) => (rejectAttach = rej)));
+    render(<ChatRoute />);
+    await user.click(await screen.findByRole('button', { name: 'Attach files' }));
+    await waitFor(() => expect(useApp.getState().route).toMatchObject({ name: 'chat', chatId: 'c-new' }));
+
+    await act(async () => rejectAttach('That file is larger than 50 MB'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('That file is larger than 50 MB');
   });
 });
 

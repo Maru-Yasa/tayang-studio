@@ -258,6 +258,16 @@ export const assetUrl = (path: string): string => convertFileSrc(path);
 // ---- attachments ----
 export const attachFile = (chatId: string, sourcePath: string) =>
   invoke<Extract<MessagePart, { type: 'file' }>>('attach_file', { chatId, sourcePath });
+export const copyChatAttachments = (
+  fromChatId: string,
+  target: { projectId?: string; toChatId?: string; files?: MessagePart[] },
+) =>
+  invoke<Extract<MessagePart, { type: 'file' }>[]>('copy_chat_attachments', {
+    fromChatId,
+    projectId: target.projectId ?? null,
+    toChatId: target.toChatId ?? null,
+    files: target.files ?? null,
+  });
 
 // ---- project files (the workspace) ----
 

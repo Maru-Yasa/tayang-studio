@@ -122,7 +122,10 @@ describe('topics', () => {
     // What the user asked for rides along, trimmed and capped; empty notes are left out.
     expect(topicIdeaFromAction({ title: 'T', notes: '  no voice-over  ' })!.notes).toBe('no voice-over');
     expect(topicIdeaFromAction({ title: 'T', notes: '' })).not.toHaveProperty('notes');
-    expect(topicIdeaFromAction({ title: 'T', notes: 'x'.repeat(2000) })!.notes).toHaveLength(600);
+    expect(topicIdeaFromAction({ title: 'T', notes: 'x'.repeat(2000) })!.notes).toHaveLength(2000);
+    expect(topicIdeaFromAction({ title: 'T', notes: 'x'.repeat(20000) })!.notes).toHaveLength(16000);
+    expect(topicIdeaFromAction({ title: 'T', hasScript: true })).toMatchObject({ hasScript: true });
+    expect(topicIdeaFromAction({ title: 'T', hasScript: false })).not.toHaveProperty('hasScript');
     // An agent can't ask for a 1-second or a 3-hour video.
     expect(topicIdeaFromAction({ title: 'T', lengthSec: 1 })!.lengthSec).toBe(5);
     expect(topicIdeaFromAction({ title: 'T', lengthSec: 10800 })!.lengthSec).toBe(600);
@@ -245,6 +248,17 @@ describe('brief', () => {
     expect(b).not.toContain(FRAME_CHECK_PROMPT);
     expect(b).not.toContain('Quality loop');
     expect(b).toContain('npx hyperframes');
+  });
+  it('adds Brief & assets when carried notes or attachments are given', () => {
+    const project = { title: 'Promo', kind: 'promo', format: '9:16', language: 'id' } as Project;
+    expect(buildProjectBrief(project, null, { fps: 30, frameCheck: false })).not.toContain('## Brief & assets');
+    const b = buildProjectBrief(project, null, { fps: 30, frameCheck: false }, {
+      notes: 'Hook: why coffee tastes bitter.\nCTA: follow.',
+      attachments: ['attachments/logo.png', 'attachments/script.txt'],
+    });
+    expect(b).toContain('## Brief & assets');
+    expect(b).toContain('Hook: why coffee tastes bitter.\nCTA: follow.');
+    expect(b).toContain('Attached files (already in this folder):\n- attachments/logo.png\n- attachments/script.txt');
   });
 });
 

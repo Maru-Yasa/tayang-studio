@@ -22,7 +22,7 @@ import { AGENT_NAMES } from '@/lib/agents';
 import { assetUrl, attachFile, detectAgents, setAgentModel } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/state/app';
-import { autoOn, useChat, type StyleRef } from '@/state/chat';
+import { autoOn, useChat, type MentionRef, type StyleRef } from '@/state/chat';
 import { chatModels, modelOptions, useModels } from '@/state/models';
 import { track } from '@/lib/analytics';
 
@@ -41,10 +41,7 @@ export function fileSize(bytes: number): string {
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export interface MentionRef {
-  projectId: string;
-  title: string;
-}
+export type { MentionRef };
 
 function FileChip({ part, onRemove }: { part: FilePart; onRemove(): void }) {
   const { t } = useTranslation();
@@ -335,33 +332,29 @@ export function Composer({
   const auto = useChat((s) => autoOn(s, chatId, settingsAuto));
   const autoBusy = useChat((s) => !!chatId && !!s.autoBusy[chatId]);
   const attachments = useChat((s) => (chatId ? s.attachments[chatId] : undefined)) ?? NONE;
+  const errorKey = chatId ?? draftKey ?? 'new';
+  const attachError = useChat((s) => s.attachError[errorKey] ?? null);
+  const attachingCount = useChat((s) => (chatId ? s.attaching[chatId] ?? 0 : 0));
   const [text, setText] = useState(() => initialText ?? (draftKey ? useChat.getState().drafts[draftKey]?.text : undefined) ?? '');
   const [styleRef, setStyleRef] = useState<StyleRef | null>(() => (draftKey ? useChat.getState().drafts[draftKey]?.style : null) ?? null);
   useEffect(() => {
-    if (draftKey) useChat.getState().setDraft(draftKey, { text, style: styleRef });
-  }, [draftKey, text, styleRef]);
+    if (draftKey) useChat.getState().setDraft(draftKey, { text, style: styleRef, mention });
+  }, [draftKey, text, styleRef, mention]);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [active, setActive] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [attachError, setAttachError] = useState<string | null>(null);
 
   const attachPaths = async (paths: string[]) => {
     if (paths.length === 0) return;
-    setAttachError(null);
+    useChat.getState().setAttachError(errorKey, null);
     try {
       const id = chatId ?? (await ensureChat?.());
       if (!id) return;
-      for (const path of paths) {
-        try {
-          useChat.getState().attach(id, await attachFile(id, path));
-        } catch (e) {
-          setAttachError(errorText(e));
-        }
-      }
+      await useChat.getState().attachFiles(id, paths, attachFile, errorKey);
     } catch (e) {
-      setAttachError(errorText(e));
+      useChat.getState().setAttachError(errorKey, errorText(e));
     }
   };
   // Dropped paths arrive from the window, so the latest closure goes through a ref.
@@ -374,7 +367,7 @@ export function Composer({
       if (!picked) return;
       await attachPaths(Array.isArray(picked) ? picked : [picked]);
     } catch (e) {
-      setAttachError(errorText(e));
+      useChat.getState().setAttachError(errorKey, errorText(e));
     }
   };
 
@@ -452,7 +445,7 @@ export function Composer({
     if (s) pickStyle(s);
   };
 
-  const canSend = !disabled && (text.trim().length > 0 || !!mention || !!styleRef || attachments.length > 0);
+  const canSend = !disabled && (text.trim().length > 0 || !!mention || !!styleRef || attachments.length > 0 || attachingCount > 0);
   const sending = useRef(false);
   const send = async () => {
     if (!canSend || sending.current) return;
@@ -535,7 +528,7 @@ export function Composer({
                 {attachError}
               </p>
             )}
-            {(mention || styleRef || attachments.length > 0) && (
+            {(mention || styleRef || attachments.length > 0 || attachingCount > 0) && (
               <div className="flex flex-wrap gap-2">
                 {mention && (
                   <span className="inline-flex h-6 items-center gap-1 rounded-sm border border-deep-orange bg-tint pl-2 pr-1 text-[13px] font-medium text-orange-light">
@@ -580,6 +573,15 @@ export function Composer({
                   ) : a.type === 'file' ? (
                     <FileChip key={i} part={a} onRemove={() => chatId && useChat.getState().detach(chatId, i)} />
                   ) : null,
+                )}
+                {attachingCount > 0 && (
+                  <span
+                    role="status"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-hairline px-2 text-xs text-text-3"
+                  >
+                    <Loader2 size={14} strokeWidth={1.5} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    <span>{t('composer.attaching')}</span>
+                  </span>
                 )}
               </div>
             )}

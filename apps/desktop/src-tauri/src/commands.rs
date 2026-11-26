@@ -1131,17 +1131,20 @@ pub fn resolve_cwd(
     Ok(cwd)
 }
 
-fn project_folder_for_chat(state: &AppState, chat_id: &str) -> CmdResult<Option<PathBuf>> {
-    let chat = state.db.get_chat(chat_id).map_err(err)?;
+fn project_folder_for_chat_db(db: &Db, chat_id: &str) -> CmdResult<Option<PathBuf>> {
+    let chat = db.get_chat(chat_id).map_err(err)?;
     let Some(project_id) = chat.and_then(|c| c.project_id) else {
         return Ok(None);
     };
-    let project = state
-        .db
+    let project = db
         .get_project(&project_id)
         .map_err(err)?
         .ok_or("This chat's project no longer exists")?;
     Ok(Some(PathBuf::from(project.folder)))
+}
+
+fn project_folder_for_chat(state: &AppState, chat_id: &str) -> CmdResult<Option<PathBuf>> {
+    project_folder_for_chat_db(&state.db, chat_id)
 }
 
 /// Added to Claude's system prompt for sessions Tayang starts.
@@ -1837,6 +1840,108 @@ pub fn attach_file(
     let folder = project_folder_for_chat(&state, &chat_id)?;
     let cwd = resolve_cwd(&state.working(), &chat_id, folder.as_deref())?;
     copy_attachment(&cwd, Path::new(&source_path), MAX_ATTACHMENT)
+}
+
+/// Copies attached files from `from_chat_id`'s folder into either `project_id`'s project folder or
+/// `to_chat_id`'s chat folder, returning updated `MessagePart::File` entries pointing at the copied
+/// files inside the target folder.
+pub fn copy_chat_attachments_with(
+    db: &Db,
+    working: &Path,
+    from_chat_id: &str,
+    project_id: Option<&str>,
+    to_chat_id: Option<&str>,
+    files: Option<&[MessagePart]>,
+) -> CmdResult<Vec<MessagePart>> {
+    if files.is_some_and(|list| list.is_empty()) {
+        return Ok(Vec::new());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut paths: Vec<String> = Vec::new();
+    if let Some(list) = files {
+        for part in list {
+            if let MessagePart::File { path, .. } = part {
+                if seen.insert(path.clone()) {
+                    paths.push(path.clone());
+                }
+            }
+        }
+    } else {
+        for msg in db.list_messages(from_chat_id).map_err(err)? {
+            if msg.role != MessageRole::User {
+                continue;
+            }
+            for part in msg.parts {
+                if let MessagePart::File { path, .. } = part {
+                    if seen.insert(path.clone()) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let from_folder = project_folder_for_chat_db(db, from_chat_id)?;
+    let from_cwd = resolve_cwd(working, from_chat_id, from_folder.as_deref())?;
+    let to_cwd = if let Some(pid) = project_id {
+        let project = db
+            .get_project(pid)
+            .map_err(err)?
+            .ok_or_else(|| "That project no longer exists".to_string())?;
+        let folder = PathBuf::from(project.folder);
+        if !folder.is_dir() {
+            return Err(format!("This project's folder is missing: {}", folder.display()));
+        }
+        folder
+    } else if let Some(cid) = to_chat_id {
+        let to_folder = project_folder_for_chat_db(db, cid)?;
+        resolve_cwd(working, cid, to_folder.as_deref())?
+    } else {
+        return Err("A target project or chat is required".into());
+    };
+
+    let from_root = std::fs::canonicalize(&from_cwd)
+        .map_err(|e| format!("Can't read {}: {e}", from_cwd.display()))?;
+    let mut copied = Vec::new();
+    for raw_path in paths {
+        let src = Path::new(&raw_path);
+        if !projects::ensure_inside(&from_cwd, src) {
+            return Err("That file is outside this chat's folder".into());
+        }
+        if !src.exists() {
+            continue;
+        }
+        let real = std::fs::canonicalize(src)
+            .map_err(|e| format!("Can't read {}: {e}", src.display()))?;
+        if !real.starts_with(&from_root) {
+            return Err("That file is outside this chat's folder".into());
+        }
+        if real.is_file() {
+            copied.push(copy_attachment(&to_cwd, &real, MAX_ATTACHMENT)?);
+        }
+    }
+    Ok(copied)
+}
+
+#[tauri::command]
+pub fn copy_chat_attachments(
+    state: State<'_, AppState>,
+    from_chat_id: String,
+    project_id: Option<String>,
+    to_chat_id: Option<String>,
+    files: Option<Vec<MessagePart>>,
+) -> CmdResult<Vec<MessagePart>> {
+    copy_chat_attachments_with(
+        &state.db,
+        &state.working(),
+        &from_chat_id,
+        project_id.as_deref(),
+        to_chat_id.as_deref(),
+        files.as_deref(),
+    )
 }
 
 /// Frame images must live inside the working folder or inside the recorded folder of
@@ -3365,6 +3470,89 @@ mod tests {
         };
         assert!(check_file_parts(&cwd, &[file(cwd.join("attachments").join("x"))]).is_ok());
         assert!(check_file_parts(&cwd, &[file(tmp.path().join("secret"))]).is_err());
+    }
+
+    #[test]
+    fn copy_chat_attachments_copies_into_project_or_chat_and_checks_bounds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working = tmp.path().join("working");
+        let proj_dir = working.join("my-video");
+        std::fs::create_dir_all(&proj_dir).unwrap();
+
+        let db = Db::open_in_memory().unwrap();
+        let src_chat = db.create_chat(None, AgentId::Claude, "Draft").unwrap();
+        let dst_chat = db.create_chat(None, AgentId::Claude, "Autopilot").unwrap();
+        db.insert_project(&crate::types::Project {
+            id: "p1".into(),
+            title: "My video".into(),
+            slug: "my-video".into(),
+            folder: proj_dir.to_string_lossy().into_owned(),
+            kind: crate::types::VideoKind::Explainer,
+            format: crate::types::VideoFormat::Portrait,
+            language: crate::types::VideoLanguage::Id,
+            status: crate::types::ProjectStatus::Draft,
+            style_id: None,
+            scheduled_at: None,
+            review_state: crate::types::ReviewState::None,
+            posted_at: None,
+            reminded_at: None,
+            review_reminded_at: None,
+            social_post_id: None,
+            duration_sec: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        })
+        .unwrap();
+
+        let src_cwd = resolve_cwd(&working, &src_chat.id, None).unwrap();
+        let outside_file = tmp.path().join("secret.txt");
+        std::fs::write(&outside_file, b"nope").unwrap();
+        let orig_logo = tmp.path().join("logo.png");
+        std::fs::write(&orig_logo, b"png-data").unwrap();
+        let orig_brief = tmp.path().join("brief.txt");
+        std::fs::write(&orig_brief, b"hello script").unwrap();
+
+        let attached_logo = copy_attachment(&src_cwd, &orig_logo, MAX_ATTACHMENT).unwrap();
+        let attached_brief = copy_attachment(&src_cwd, &orig_brief, MAX_ATTACHMENT).unwrap();
+
+        // Explicit list deduplicates duplicate file paths and rewrites paths inside project.folder.
+        let copied_to_proj = copy_chat_attachments_with(
+            &db,
+            &working,
+            &src_chat.id,
+            Some("p1"),
+            None,
+            Some(&[attached_logo.clone(), attached_logo.clone(), attached_brief.clone()]),
+        )
+        .unwrap();
+        assert_eq!(copied_to_proj.len(), 2);
+        assert!(check_file_parts(&proj_dir, &copied_to_proj).is_ok());
+        assert_eq!(std::fs::read(proj_dir.join("attachments").join("logo.png")).unwrap(), b"png-data");
+        assert_eq!(std::fs::read(proj_dir.join("attachments").join("brief.txt")).unwrap(), b"hello script");
+
+        // Copying to another standalone chat stores copies in the target chat's folder.
+        let copied_to_chat = copy_chat_attachments_with(
+            &db,
+            &working,
+            &src_chat.id,
+            None,
+            Some(&dst_chat.id),
+            Some(&[attached_brief]),
+        )
+        .unwrap();
+        let dst_cwd = resolve_cwd(&working, &dst_chat.id, None).unwrap();
+        assert_eq!(copied_to_chat.len(), 1);
+        assert!(check_file_parts(&dst_cwd, &copied_to_chat).is_ok());
+
+        // Rejects paths outside from_chat_id's folder.
+        let outside_part = MessagePart::File {
+            path: outside_file.to_string_lossy().into_owned(),
+            name: "secret.txt".into(),
+            mime: "text/plain".into(),
+            size: 4,
+            modified_at: None,
+        };
+        assert!(copy_chat_attachments_with(&db, &working, &src_chat.id, Some("p1"), None, Some(&[outside_part])).is_err());
     }
 }
 
