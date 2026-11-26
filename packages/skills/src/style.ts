@@ -68,16 +68,17 @@ export function buildTopicIdeasPrompt(
 export const TOPIC_LENGTH = { min: 5, max: 600 } as const;
 export const clampTopicLength = (sec: number) => Math.min(TOPIC_LENGTH.max, Math.max(TOPIC_LENGTH.min, Math.round(sec)));
 
-/** The longest `notes` a topic card may carry into the project chat. */
-const NOTES_MAX = 600;
+/** The longest `notes` a topic card or /video handoff may carry into the project chat. */
+const NOTES_MAX = 16_000;
 
 /**
  * What a pick_topic button press carries, or null when it has no title. `notes` are the user's own wishes
- * for the video that the title can't hold (no voice-over, a fact to include), passed on to the project chat.
+ * for the video that the title can't hold (no voice-over, a fact to include, or a composed brief/script),
+ * passed on to the project chat.
  */
 export function topicIdeaFromAction(
   context: Record<string, unknown>,
-): { title: string; kind: VideoKind; lengthSec: number; styleId?: string; notes?: string } | null {
+): { title: string; kind: VideoKind; lengthSec: number; styleId?: string; notes?: string; hasScript?: boolean } | null {
   const title = typeof context.title === 'string' ? context.title.trim() : '';
   if (!title) return null;
   const kind = VIDEO_KINDS.includes(context.kind as VideoKind) ? (context.kind as VideoKind) : 'explainer';
@@ -85,7 +86,15 @@ export function topicIdeaFromAction(
   const lengthSec = Number.isFinite(len) && len > 0 ? clampTopicLength(len) : 30;
   const styleId = typeof context.styleId === 'string' && context.styleId ? context.styleId : undefined;
   const notes = typeof context.notes === 'string' ? context.notes.trim().slice(0, NOTES_MAX) : '';
-  return { title, kind, lengthSec, ...(styleId ? { styleId } : {}), ...(notes ? { notes } : {}) };
+  const hasScript = context.hasScript === true;
+  return {
+    title,
+    kind,
+    lengthSec,
+    ...(styleId ? { styleId } : {}),
+    ...(notes ? { notes } : {}),
+    ...(hasScript ? { hasScript } : {}),
+  };
 }
 
 /** Agents that still answer with a ```json block: pull the ideas out and drop the block from the text. */

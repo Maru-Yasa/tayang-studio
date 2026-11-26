@@ -44,11 +44,19 @@ function styleSection(style: Style): string {
 export const HYPERFRAMES_GPU_FLAG = '--gpu';
 export const REMOTION_GPU_FLAG = '--hardware-acceleration=if-possible';
 
+export interface ProjectBriefExtra {
+  /** User-provided script, prompt, or wishes carried over from the chat that started this video. */
+  notes?: string;
+  /** Relative paths of attached files already copied into this project folder (e.g. `attachments/logo.png`). */
+  attachments?: string[];
+}
+
 /** The project's AGENTS.md. The quality loop is only included when `settings.frameCheck` is on. */
 export function buildProjectBrief(
   p: Project,
   style: Style | null,
   settings: Pick<Settings, 'fps' | 'frameCheck' | 'renderAcceleration'>,
+  extra?: ProjectBriefExtra,
 ): string {
   // GPU encoding unless the user picked the CPU; both tools fall back to the CPU without a GPU encoder.
   const gpu = settings.renderAcceleration !== 'cpu';
@@ -57,6 +65,8 @@ export function buildProjectBrief(
   const template = !!style?.template;
   // A copied style decides its own engine; only a template's own toolchain overrides it.
   const remotion = !template && style?.engine === 'remotion';
+  const notes = extra?.notes?.trim();
+  const attachments = extra?.attachments?.filter((a) => a.trim().length > 0) ?? [];
   const lines = [
     `# ${p.title}`,
     '',
@@ -65,6 +75,14 @@ export function buildProjectBrief(
     `- Format: ${p.format}, ${settings.fps} fps`,
     `- Video language: ${LANGUAGE[p.language]}. All on-screen text and voice-over are in ${LANGUAGE[p.language]}.`,
     '',
+    ...(notes || attachments.length
+      ? [
+          '## Brief & assets',
+          ...(notes ? [notes] : []),
+          ...(attachments.length ? [...(notes ? [''] : []), 'Attached files (already in this folder):', ...attachments.map((a) => `- ${a}`)] : []),
+          '',
+        ]
+      : []),
     '## How to work',
     template
       ? '- Follow STYLE.md for the toolchain; install and render with the commands in tayang.json.'

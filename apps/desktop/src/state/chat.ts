@@ -72,6 +72,10 @@ interface ChatState {
   /** Takes the chat's oldest waiting action of this kind. */
   takeAction(chatId: string, name: AgentAction['name']): AgentAction | undefined;
   attachments: Record<string, MessagePart[]>;
+  /** Count of in-flight file copies per chat, so UI and send() know an attach is running. */
+  attaching: Record<string, number>;
+  /** Last attach failure per chat (or NEW_CHAT_DRAFT before chat creation), preserved across ChatNew -> ChatThread navigation. */
+  attachError: Record<string, string | null>;
   /** Chats whose agent session was started in this app session. */
   started: Record<string, boolean>;
   /** Per-chat Auto toggle (in memory). Chats without an entry follow Settings. */
@@ -82,7 +86,7 @@ interface ChatState {
   autoBusy: Record<string, boolean>;
   /** Chat rows seen in this app session, so a screen knows a chat's project before asking Rust. */
   rows: Record<string, Chat>;
-  /** Unsent composer text and style chip per chat; `new` is the New chat screen's, which has no chat yet. */
+  /** Unsent composer text, style chip, and @video mention per chat; `new` is the New chat screen's, which has no chat yet. */
   drafts: Record<string, Draft>;
   /** The style library as the chat screens last read it, for the @ menu and style context. */
   styles: Style[];
@@ -119,6 +123,15 @@ interface ChatState {
   notice(chatId: string, text: string): void;
   attach(chatId: string, part: MessagePart): void;
   detach(chatId: string, index: number): void;
+  clearAttachments(chatId: string): void;
+  setAttachError(key: string, message: string | null): void;
+  attachFiles(
+    chatId: string,
+    paths: string[],
+    copy: (chatId: string, path: string) => Promise<MessagePart>,
+    errorKey?: string,
+  ): Promise<void>;
+  flushAttaches(chatId: string): Promise<void>;
   listen(): void;
   reset(): void;
 }
@@ -129,13 +142,20 @@ export interface StyleRef {
   name: string;
 }
 
+/** A video picked from the @ menu, waiting in the composer. */
+export interface MentionRef {
+  projectId: string;
+  title: string;
+}
+
 /** What the composer holds before it is sent. */
 export interface Draft {
   text: string;
   style: StyleRef | null;
+  mention?: MentionRef | null;
 }
 
-export const EMPTY_DRAFT: Draft = { text: '', style: null };
+export const EMPTY_DRAFT: Draft = { text: '', style: null, mention: null };
 
 /** The draft key of the New chat screen, which has no chat id yet. */
 export const NEW_CHAT_DRAFT = 'new';
@@ -155,6 +175,8 @@ const tracked = new Set<string>();
 const chatAgent = new Map<string, AgentId>();
 /** Project chats whose turns are tracked as a build job. */
 const chatJobs = new Map<string, ChatJob>();
+/** In-flight file copies per chat; send() and topic handoff await them before reading attachments. */
+const pendingAttaches = new Map<string, Set<Promise<void>>>();
 
 /** Stored message id → the local id it had before it was stored, so the list keeps its React key. */
 const clientKeys = new Map<string, string>();
@@ -666,6 +688,8 @@ export const useChat = create<ChatState>((set, get) => {
     questions: {},
     actions: {},
     attachments: {},
+    attaching: {},
+    attachError: {},
     started: {},
     auto: {},
     pendingAuto: null,
@@ -678,8 +702,21 @@ export const useChat = create<ChatState>((set, get) => {
 
     setDraft(key, draft) {
       const was = get().drafts[key] ?? EMPTY_DRAFT;
-      if (was.text === draft.text && was.style?.styleId === draft.style?.styleId) return;
-      set((s) => ({ drafts: { ...s.drafts, [key]: draft } }));
+      const nextMention = draft.mention ?? null;
+      const wasMention = was.mention ?? null;
+      if (
+        was.text === draft.text &&
+        was.style?.styleId === draft.style?.styleId &&
+        wasMention?.projectId === nextMention?.projectId
+      ) {
+        return;
+      }
+      set((s) => ({
+        drafts: {
+          ...s.drafts,
+          [key]: { text: draft.text, style: draft.style, ...(nextMention ? { mention: nextMention } : {}) },
+        },
+      }));
     },
 
     async setAuto(chatId, on) {
@@ -741,14 +778,17 @@ export const useChat = create<ChatState>((set, get) => {
 
     async send(chatId, parts, opts) {
       tracked.add(chatId);
+      if (pendingAttaches.get(chatId)?.size) await get().flushAttaches(chatId);
       const attached = opts?.keepAttachments ? [] : (get().attachments[chatId] ?? []);
       const visible = [...attached, ...parts];
+      if (!visible.length && !opts?.promptParts?.length) return null;
       turnSeq.set(chatId, (turnSeq.get(chatId) ?? 0) + 1);
       // The last turn's message, still waiting for its images, is stored before this one.
       pendingSaves.get(chatId)?.();
       if (!get().streaming[chatId]) imageSince.set(chatId, new Date(Date.now() - IMAGE_SLACK_MS).toISOString());
       set((s) => ({
         attachments: opts?.keepAttachments ? s.attachments : { ...s.attachments, [chatId]: [] },
+        attachError: s.attachError[chatId] ? { ...s.attachError, [chatId]: null } : s.attachError,
         streaming: { ...s.streaming, [chatId]: true },
         // A send refused because a turn is running keeps that turn's start.
         turnStartedAt: { ...s.turnStartedAt, [chatId]: s.streaming[chatId] ? (s.turnStartedAt[chatId] ?? Date.now()) : Date.now() },
@@ -896,7 +936,64 @@ export const useChat = create<ChatState>((set, get) => {
     detach: (chatId, index) =>
       set((s) => ({
         attachments: { ...s.attachments, [chatId]: (s.attachments[chatId] ?? []).filter((_, i) => i !== index) },
+        attachError: s.attachError[chatId] ? { ...s.attachError, [chatId]: null } : s.attachError,
       })),
+
+    clearAttachments: (chatId) =>
+      set((s) => ({
+        attachments: { ...s.attachments, [chatId]: [] },
+        attachError: s.attachError[chatId] ? { ...s.attachError, [chatId]: null } : s.attachError,
+      })),
+
+    setAttachError: (key, message) =>
+      set((s) => ({ attachError: { ...s.attachError, [key]: message } })),
+
+    async attachFiles(chatId, paths, copy, errorKey = chatId) {
+      if (paths.length === 0) return;
+      let setForChat = pendingAttaches.get(chatId);
+      if (!setForChat) {
+        setForChat = new Set();
+        pendingAttaches.set(chatId, setForChat);
+      }
+      set((s) => ({
+        attaching: { ...s.attaching, [chatId]: (s.attaching[chatId] ?? 0) + 1 },
+        attachError: { ...s.attachError, [errorKey]: null, [chatId]: null },
+      }));
+      const run = (async () => {
+        try {
+          for (const path of paths) {
+            try {
+              const part = await copy(chatId, path);
+              get().attach(chatId, part);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              set((s) => ({ attachError: { ...s.attachError, [chatId]: msg } }));
+            }
+          }
+        } finally {
+          set((s) => {
+            const next = Math.max(0, (s.attaching[chatId] ?? 1) - 1);
+            const attaching = { ...s.attaching };
+            if (next === 0) delete attaching[chatId];
+            else attaching[chatId] = next;
+            return { attaching };
+          });
+        }
+      })();
+      setForChat.add(run);
+      try {
+        await run;
+      } finally {
+        setForChat.delete(run);
+        if (setForChat.size === 0 && pendingAttaches.get(chatId) === setForChat) pendingAttaches.delete(chatId);
+      }
+    },
+
+    async flushAttaches(chatId) {
+      while (pendingAttaches.get(chatId)?.size) {
+        await Promise.all([...pendingAttaches.get(chatId)!]);
+      }
+    },
 
     listen() {
       if (unlisten.length) return;
@@ -929,6 +1026,7 @@ export const useChat = create<ChatState>((set, get) => {
       tracked.clear();
       chatAgent.clear();
       chatJobs.clear();
+      pendingAttaches.clear();
       pendingRecap.clear();
       clientKeys.clear();
       turnSeq.clear();
@@ -942,7 +1040,7 @@ export const useChat = create<ChatState>((set, get) => {
       resetProjectStatus();
       stopAllWatches();
       useRender.setState({ runs: {} });
-      set({ messages: {}, streaming: {}, turnStartedAt: {}, permissions: {}, questions: {}, actions: {}, attachments: {}, started: {}, auto: {}, pendingAuto: null, autoBusy: {}, rows: {}, drafts: {}, styles: [] });
+      set({ messages: {}, streaming: {}, turnStartedAt: {}, permissions: {}, questions: {}, actions: {}, attachments: {}, attaching: {}, attachError: {}, started: {}, auto: {}, pendingAuto: null, autoBusy: {}, rows: {}, drafts: {}, styles: [] });
     },
   };
 });

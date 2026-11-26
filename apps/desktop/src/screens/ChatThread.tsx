@@ -13,7 +13,7 @@ import { TraceButton } from '@/components/TraceDialog';
 import { TurnRail } from '@/components/TurnRail';
 import { listProjects } from '@/lib/ipc';
 import { lastMentionedStyle, mentionContext, mentionedIn, styleContext } from '@/lib/mentions';
-import { ideasFromReply, startTopic, type TopicIdea } from '@/lib/topics';
+import { collectChatFiles, ideasFromReply, startTopic, type TopicIdea } from '@/lib/topics';
 import { extractA2ui } from '@/a2ui/parse';
 import { useApp } from '@/state/app';
 import { appendSystem, headPermission, headQuestion, useChat } from '@/state/chat';
@@ -49,7 +49,7 @@ export function ChatThread({ chatId, draft, styleId: routeStyleId }: { chatId: s
   // The template New chat was started from; kept until a topic starts a project, or the user removes it.
   const [styleId, setStyleId] = useState<string | null>(routeStyleId ?? null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [mention, setMention] = useState<MentionRef | null>(null);
+  const [mention, setMention] = useState<MentionRef | null>(() => useChat.getState().drafts[chatId]?.mention ?? null);
   /** A picked topic is being set up (project, chat, template). */
   const [busy, setBusy] = useState(false);
   const [setupLine, setSetupLine] = useState<string | null>(null);
@@ -113,7 +113,7 @@ export function ChatThread({ chatId, draft, styleId: routeStyleId }: { chatId: s
   };
 
   /** Starts the picked topic; then records the pick here, so the cards (and an A2UI card's surface) read as answered. */
-  const pickIdea = async (idea: TopicIdea, card?: A2uiAction) => {
+  const pickIdea = async (idea: TopicIdea, card?: A2uiAction, fromCard = !!card) => {
     if (!settings || busy || streaming || picking.has(chatId)) return;
     picking.add(chatId);
     setBusy(true);
@@ -123,8 +123,18 @@ export function ChatThread({ chatId, draft, styleId: routeStyleId }: { chatId: s
       // The idea's own style wins when it is a synced one; else the template chip's style, else the
       // style the user last mentioned here (a copied style has no template, so no chip).
       const chatStyle = chipTemplate ?? styleId ?? lastMentionedStyle(useChat.getState().messages[chatId]);
-      await startTopic(idea, { settings, agent, styleId: chatStyle, onStatus: setSetupLine });
+      await startTopic(idea, {
+        settings,
+        agent,
+        styleId: chatStyle,
+        onStatus: setSetupLine,
+        sourceChatId: chatId,
+        fromCard,
+        projects,
+        unsentMention: mention,
+      });
       setStyleId(null);
+      setMention(null);
       const { summary, ...action } = card ?? { summary: '' };
       await appendSystem(
         chatId,
@@ -146,7 +156,7 @@ export function ChatThread({ chatId, draft, styleId: routeStyleId }: { chatId: s
     if (!pendingPick || streaming || busy) return;
     const a = useChat.getState().takeAction(chatId, 'pick_topic');
     const idea = a && topicIdeaFromAction(a.context);
-    if (idea) void pickIdea(idea);
+    if (idea) void pickIdea(idea, undefined, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPick, streaming, busy, chatId]);
 
@@ -164,14 +174,20 @@ export function ChatThread({ chatId, draft, styleId: routeStyleId }: { chatId: s
     if (!pendingAutopilotChat || streaming) return;
     const a = useChat.getState().takeAction(chatId, 'start_autopilot_chat');
     const settings = useApp.getState().settings;
-    if (a && settings) void startAutopilotChat(settings, typeof a.context?.notes === 'string' ? a.context.notes : '');
+    if (a && settings) {
+      const notes = typeof a.context?.notes === 'string' ? a.context.notes : '';
+      const files = collectChatFiles(chatId);
+      void (files.length
+        ? startAutopilotChat(settings, notes, { sourceChatId: chatId, files })
+        : startAutopilotChat(settings, notes));
+    }
   }, [pendingAutopilotChat, streaming, chatId]);
 
   const onA2uiAction = (a: A2uiAction) => {
     if (a.name !== 'pick_topic') return false;
     const idea = topicIdeaFromAction(a.context);
     if (!idea) return false;
-    void pickIdea(idea, a);
+    void pickIdea(idea, a, true);
     return true;
   };
 
@@ -221,7 +237,7 @@ export function ChatThread({ chatId, draft, styleId: routeStyleId }: { chatId: s
                         key={idea.title}
                         type="button"
                         disabled={busy || streaming}
-                        onClick={() => void pickIdea(idea)}
+                        onClick={() => void pickIdea(idea, undefined, true)}
                         className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left text-foreground transition-colors hover:bg-raised disabled:cursor-default disabled:opacity-60"
                       >
                         <span className="text-[14px] font-medium">{idea.title}</span>
